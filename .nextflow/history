@@ -1,0 +1,1 @@
+2023-07-25 03:27:25	56.7s	sleepy_mayer	OK	2c46253cc4be882de3ec937048d2a4e5	c0d1e9a1-72b4-4c83-88aa-1df2f7791b6b	nextflow run peasoup.nf --fil_file /hercules/scratch/vishnu/KNOWN_PULSAR_TEST/OBS_1.fil /hercules/scratch/vishnu/KNOWN_PULSAR_TEST/OBS_2.fil -profile slurm -with-report test.html

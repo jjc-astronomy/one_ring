@@ -1,0 +1,63 @@
+Jul-25 03:27:24.348 [main] DEBUG nextflow.cli.Launcher - $> nextflow run peasoup.nf --fil_file /hercules/scratch/vishnu/KNOWN_PULSAR_TEST/OBS_1.fil /hercules/scratch/vishnu/KNOWN_PULSAR_TEST/OBS_2.fil -profile slurm -with-report test.html
+Jul-25 03:27:24.400 [main] INFO  nextflow.cli.CmdRun - N E X T F L O W  ~  version 23.04.2
+Jul-25 03:27:24.421 [main] DEBUG nextflow.plugin.PluginsFacade - Setting up plugin manager > mode=prod; embedded=false; plugins-dir=/u/vishnu/.nextflow/plugins; core-plugins: nf-amazon@1.16.2,nf-azure@1.0.1,nf-codecommit@0.1.4,nf-console@1.0.5,nf-ga4gh@1.0.5,nf-google@1.7.3,nf-tower@1.5.12,nf-wave@0.8.3
+Jul-25 03:27:24.431 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Enabled plugins: []
+Jul-25 03:27:24.432 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Disabled plugins: []
+Jul-25 03:27:24.435 [main] INFO  org.pf4j.DefaultPluginManager - PF4J version 3.4.1 in 'deployment' mode
+Jul-25 03:27:24.445 [main] INFO  org.pf4j.AbstractPluginManager - No plugins
+Jul-25 03:27:24.458 [main] DEBUG nextflow.config.ConfigBuilder - Found config local: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/nextflow.config
+Jul-25 03:27:24.459 [main] DEBUG nextflow.config.ConfigBuilder - Parsing config file: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/nextflow.config
+Jul-25 03:27:24.481 [main] DEBUG nextflow.config.ConfigBuilder - Applying config profile: `slurm`
+Jul-25 03:27:24.996 [main] DEBUG nextflow.config.ConfigBuilder - Available config profiles: [slurm]
+Jul-25 03:27:25.024 [main] DEBUG nextflow.cli.CmdRun - Applied DSL=2 from script declararion
+Jul-25 03:27:25.042 [main] INFO  nextflow.cli.CmdRun - Launching `peasoup.nf` [sleepy_mayer] DSL2 - revision: 2c46253cc4
+Jul-25 03:27:25.043 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins default=[]
+Jul-25 03:27:25.043 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins resolved requirement=[]
+Jul-25 03:27:25.056 [main] DEBUG nextflow.secret.LocalSecretsProvider - Secrets store: /u/vishnu/.nextflow/secrets/store.json
+Jul-25 03:27:25.059 [main] DEBUG nextflow.secret.SecretsLoader - Discovered secrets providers: [nextflow.secret.LocalSecretsProvider@53e800f9] - activable => nextflow.secret.LocalSecretsProvider@53e800f9
+Jul-25 03:27:25.120 [main] DEBUG nextflow.Session - Session UUID: c0d1e9a1-72b4-4c83-88aa-1df2f7791b6b
+Jul-25 03:27:25.120 [main] DEBUG nextflow.Session - Run name: sleepy_mayer
+Jul-25 03:27:25.120 [main] DEBUG nextflow.Session - Executor pool size: 24
+Jul-25 03:27:25.132 [main] DEBUG nextflow.util.ThreadPoolBuilder - Creating thread pool 'FileTransfer' minSize=10; maxSize=72; workQueue=LinkedBlockingQueue[10000]; allowCoreThreadTimeout=false
+Jul-25 03:27:25.157 [main] DEBUG nextflow.cli.CmdRun - 
+  Version: 23.04.2 build 5870
+  Created: 08-06-2023 08:29 UTC (10:29 CEST)
+  System: Linux 3.10.0-1160.59.1.el7.x86_64
+  Runtime: Groovy 3.0.16 on OpenJDK 64-Bit Server VM 17.0.6+10
+  Encoding: UTF-8 (UTF-8)
+  Process: 154618@hercules11 [130.183.197.11]
+  CPUs: 24 - Mem: 188.3 GB (149.6 GB) - Swap: 16 GB (9.6 GB)
+Jul-25 03:27:25.187 [main] DEBUG nextflow.Session - Work-dir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work [gpfs]
+Jul-25 03:27:25.187 [main] DEBUG nextflow.Session - Script base path does not exist or is not a directory: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/bin
+Jul-25 03:27:25.197 [main] DEBUG nextflow.executor.ExecutorFactory - Extension executors providers=[]
+Jul-25 03:27:25.207 [main] DEBUG nextflow.Session - Observer factory: DefaultObserverFactory
+Jul-25 03:27:25.232 [main] DEBUG nextflow.cache.CacheFactory - Using Nextflow cache factory: nextflow.cache.DefaultCacheFactory
+Jul-25 03:27:25.241 [main] DEBUG nextflow.util.CustomThreadPool - Creating default thread pool > poolSize: 25; maxThreads: 1000
+Jul-25 03:27:25.319 [main] DEBUG nextflow.Session - Session start
+Jul-25 03:27:25.766 [main] DEBUG nextflow.script.ScriptRunner - > Launching execution
+Jul-25 03:27:25.896 [main] DEBUG nextflow.executor.ExecutorFactory - << taskConfig executor: slurm
+Jul-25 03:27:25.897 [main] DEBUG nextflow.executor.ExecutorFactory - >> processorType: 'slurm'
+Jul-25 03:27:25.907 [main] DEBUG nextflow.executor.Executor - [warm up] executor > slurm
+Jul-25 03:27:25.913 [main] DEBUG n.processor.TaskPollingMonitor - Creating task monitor for executor 'slurm' > capacity: 100; pollInterval: 5s; dumpInterval: 5m 
+Jul-25 03:27:25.916 [main] DEBUG n.executor.AbstractGridExecutor - Creating executor 'slurm' > queue-stat-interval: 1m
+Jul-25 03:27:25.975 [main] DEBUG nextflow.Session - Workflow process names [dsl2]: peasoup
+Jul-25 03:27:25.976 [main] DEBUG nextflow.Session - Igniting dataflow network (2)
+Jul-25 03:27:25.981 [main] DEBUG nextflow.processor.TaskProcessor - Starting process > peasoup
+Jul-25 03:27:25.982 [main] DEBUG nextflow.script.ScriptRunner - > Awaiting termination 
+Jul-25 03:27:25.982 [main] DEBUG nextflow.Session - Session await
+Jul-25 03:27:25.987 [PathVisitor-1] DEBUG nextflow.file.PathVisitor - files for syntax: glob; folder: /hercules/scratch/vishnu/KNOWN_PULSAR_TEST/; pattern: *.fil; options: [checkIfExists:true]
+Jul-25 03:27:26.251 [Task submitter] DEBUG nextflow.executor.GridTaskHandler - [SLURM] submitted process peasoup (2) > jobId: 3084938; workDir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work/d8/af3dc07cdf5386f0585ecc7ae62320
+Jul-25 03:27:26.251 [Task submitter] INFO  nextflow.Session - [d8/af3dc0] Submitted process > peasoup (2)
+Jul-25 03:27:26.288 [Task submitter] DEBUG nextflow.executor.GridTaskHandler - [SLURM] submitted process peasoup (1) > jobId: 3084939; workDir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work/e0/d1806dbc517824d42e95aea3e51c8e
+Jul-25 03:27:26.288 [Task submitter] INFO  nextflow.Session - [e0/d1806d] Submitted process > peasoup (1)
+Jul-25 03:27:35.929 [Task monitor] DEBUG n.processor.TaskPollingMonitor - Task completed > TaskHandler[jobId: 3084938; id: 2; name: peasoup (2); status: COMPLETED; exit: 0; error: -; workDir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work/d8/af3dc07cdf5386f0585ecc7ae62320 started: 1690248450937; exited: 2023-07-25T01:27:33.185789Z; ]
+Jul-25 03:28:20.933 [Task monitor] DEBUG n.processor.TaskPollingMonitor - Task completed > TaskHandler[jobId: 3084939; id: 1; name: peasoup (1); status: COMPLETED; exit: 0; error: -; workDir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work/e0/d1806dbc517824d42e95aea3e51c8e started: 1690248450977; exited: 2023-07-25T01:28:19.35202Z; ]
+Jul-25 03:28:20.945 [main] DEBUG nextflow.Session - Session await > all processes finished
+Jul-25 03:28:20.948 [main] DEBUG nextflow.Session - Session await > all barriers passed
+Jul-25 03:28:20.958 [main] DEBUG nextflow.trace.WorkflowStatsObserver - Workflow completed > WorkflowStats[succeededCount=2; failedCount=0; ignoredCount=0; cachedCount=0; pendingCount=0; submittedCount=0; runningCount=0; retriesCount=0; abortedCount=0; succeedDuration=53.1s; failedDuration=0ms; cachedDuration=0ms;loadCpus=0; loadMemory=0; peakRunning=2; peakCpus=2; peakMemory=16 GB; ]
+Jul-25 03:28:20.958 [main] DEBUG nextflow.trace.ReportObserver - Workflow completed -- rendering execution report
+Jul-25 03:28:20.992 [main] DEBUG nextflow.trace.ReportObserver - Execution report summary data:
+  [{"cpuUsage":{"mean":66.85,"min":51.3,"q1":59.08,"q2":66.85,"q3":74.63,"max":82.4,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"process":"peasoup","mem":{"mean":721801216,"min":313372672,"q1":517586944,"q2":721801216,"q3":926015488,"max":1130229760,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"memUsage":{"mean":8.4,"min":3.65,"q1":6.03,"q2":8.4,"q3":10.78,"max":13.16,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"timeUsage":{"mean":0.74,"min":0.09,"q1":0.41,"q2":0.74,"q3":1.06,"max":1.39,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"vmem":{"mean":7102722048,"min":5650911232,"q1":6376816640,"q2":7102722048,"q3":7828627456,"max":8554532864,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"reads":{"mean":9192163796,"min":1083208529,"q1":5137686162.5,"q2":9192163796,"q3":13246641429.5,"max":17301119063,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"cpu":{"mean":66.85,"min":51.3,"q1":59.08,"q2":66.85,"q3":74.63,"max":82.4,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"time":{"mean":26574,"min":3230,"q1":14902,"q2":26574,"q3":38246,"max":49918,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"},"writes":{"mean":535228.5,"min":10986,"q1":273107.25,"q2":535228.5,"q3":797349.75,"max":1059471,"minLabel":"peasoup (2)","maxLabel":"peasoup (1)","q1Label":"peasoup (2)","q2Label":"peasoup (2)","q3Label":"peasoup (2)"}}]
+Jul-25 03:28:21.681 [main] DEBUG nextflow.cache.CacheDB - Closing CacheDB done
+Jul-25 03:28:21.703 [main] DEBUG nextflow.util.ThreadPoolManager - Thread pool 'FileTransfer' shutdown completed (hard=false)
+Jul-25 03:28:21.703 [main] DEBUG nextflow.script.ScriptRunner - > Execution complete -- Goodbye
