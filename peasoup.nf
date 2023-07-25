@@ -54,7 +54,6 @@ process peasoup {
 
     echo \${fil_file}
     echo mkdir -p \${output_path}
-    printf "Directory \${fileID} created.\n"
     peasoup -i ${fil_file} --fft_size ${fft_size} --limit ${total_cands_limit} -m ${min_snr} -o \${output_path} --acc_start ${acc_start} --acc_end ${acc_end} --dm_file \${dm_file} --ram_limit_gb ${ram_limit_gb} -n ${nh} -t ${ngpus} 
 
     """
