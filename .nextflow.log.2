@@ -1,0 +1,143 @@
+Aug-09 13:06:06.625 [main] DEBUG nextflow.cli.Launcher - $> nextflow run peasoup.nf
+Aug-09 13:06:07.122 [main] INFO  nextflow.cli.CmdRun - N E X T F L O W  ~  version 23.04.2
+Aug-09 13:06:07.198 [main] DEBUG nextflow.plugin.PluginsFacade - Setting up plugin manager > mode=prod; embedded=false; plugins-dir=/u/vishnu/.nextflow/plugins; core-plugins: nf-amazon@1.16.2,nf-azure@1.0.1,nf-codecommit@0.1.4,nf-console@1.0.5,nf-ga4gh@1.0.5,nf-google@1.7.3,nf-tower@1.5.12,nf-wave@0.8.3
+Aug-09 13:06:07.228 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Enabled plugins: []
+Aug-09 13:06:07.229 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Disabled plugins: []
+Aug-09 13:06:07.233 [main] INFO  org.pf4j.DefaultPluginManager - PF4J version 3.4.1 in 'deployment' mode
+Aug-09 13:06:07.294 [main] INFO  org.pf4j.AbstractPluginManager - No plugins
+Aug-09 13:06:07.366 [main] DEBUG nextflow.config.ConfigBuilder - Found config local: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/nextflow.config
+Aug-09 13:06:07.368 [main] DEBUG nextflow.config.ConfigBuilder - Parsing config file: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/nextflow.config
+Aug-09 13:06:07.496 [main] DEBUG nextflow.config.ConfigBuilder - Applying config profile: `standard`
+Aug-09 13:06:09.931 [main] DEBUG nextflow.cli.CmdRun - Applied DSL=2 from script declararion
+Aug-09 13:06:09.984 [main] INFO  nextflow.cli.CmdRun - Launching `peasoup.nf` [elegant_lichterman] DSL2 - revision: 79ad06baed
+Aug-09 13:06:09.994 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins default=[]
+Aug-09 13:06:09.994 [main] DEBUG nextflow.plugin.PluginsFacade - Plugins resolved requirement=[]
+Aug-09 13:06:10.009 [main] DEBUG nextflow.secret.LocalSecretsProvider - Secrets store: /u/vishnu/.nextflow/secrets/store.json
+Aug-09 13:06:10.037 [main] DEBUG nextflow.secret.SecretsLoader - Discovered secrets providers: [nextflow.secret.LocalSecretsProvider@6c3659be] - activable => nextflow.secret.LocalSecretsProvider@6c3659be
+Aug-09 13:06:10.269 [main] DEBUG nextflow.Session - Session UUID: 5d2b0ced-d0f6-404e-a936-f784058badf1
+Aug-09 13:06:10.269 [main] DEBUG nextflow.Session - Run name: elegant_lichterman
+Aug-09 13:06:10.270 [main] DEBUG nextflow.Session - Executor pool size: 24
+Aug-09 13:06:10.330 [main] DEBUG nextflow.util.ThreadPoolBuilder - Creating thread pool 'FileTransfer' minSize=10; maxSize=72; workQueue=LinkedBlockingQueue[10000]; allowCoreThreadTimeout=false
+Aug-09 13:06:10.419 [main] DEBUG nextflow.cli.CmdRun - 
+  Version: 23.04.2 build 5870
+  Created: 08-06-2023 08:29 UTC (10:29 CEST)
+  System: Linux 3.10.0-1160.59.1.el7.x86_64
+  Runtime: Groovy 3.0.16 on OpenJDK 64-Bit Server VM 17.0.6+10
+  Encoding: UTF-8 (ANSI_X3.4-1968)
+  Process: 215781@hercules11 [130.183.197.11]
+  CPUs: 24 - Mem: 188.3 GB (103.8 GB) - Swap: 16 GB (8.8 GB)
+Aug-09 13:06:10.539 [main] DEBUG nextflow.Session - Work-dir: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/work [gpfs]
+Aug-09 13:06:10.540 [main] DEBUG nextflow.Session - Script base path does not exist or is not a directory: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/bin
+Aug-09 13:06:10.551 [main] DEBUG nextflow.executor.ExecutorFactory - Extension executors providers=[]
+Aug-09 13:06:10.574 [main] DEBUG nextflow.Session - Observer factory: DefaultObserverFactory
+Aug-09 13:06:10.606 [main] DEBUG nextflow.cache.CacheFactory - Using Nextflow cache factory: nextflow.cache.DefaultCacheFactory
+Aug-09 13:06:10.622 [main] DEBUG nextflow.util.CustomThreadPool - Creating default thread pool > poolSize: 25; maxThreads: 1000
+Aug-09 13:06:10.916 [main] DEBUG nextflow.Session - Session start
+Aug-09 13:06:12.621 [main] DEBUG nextflow.script.ScriptRunner - > Launching execution
+Aug-09 13:06:13.133 [main] DEBUG nextflow.script.ProcessConfig - Config settings `withLabel:short` matches labels `short` for process with name filtool
+Aug-09 13:06:13.188 [main] DEBUG nextflow.executor.ExecutorFactory - << taskConfig executor: slurm
+Aug-09 13:06:13.204 [main] DEBUG nextflow.executor.ExecutorFactory - >> processorType: 'slurm'
+Aug-09 13:06:13.258 [main] DEBUG nextflow.executor.Executor - [warm up] executor > slurm
+Aug-09 13:06:13.283 [main] DEBUG n.processor.TaskPollingMonitor - Creating task monitor for executor 'slurm' > capacity: 100; pollInterval: 5s; dumpInterval: 5m 
+Aug-09 13:06:13.329 [main] DEBUG n.executor.AbstractGridExecutor - Creating executor 'slurm' > queue-stat-interval: 1m
+Aug-09 13:06:13.479 [main] DEBUG nextflow.script.ProcessConfig - Config settings `withLabel:gpu_short` matches labels `gpu_short` for process with name peasoup
+Aug-09 13:06:13.480 [main] DEBUG nextflow.executor.ExecutorFactory - << taskConfig executor: slurm
+Aug-09 13:06:13.486 [main] DEBUG nextflow.executor.ExecutorFactory - >> processorType: 'slurm'
+Aug-09 13:06:13.525 [main] DEBUG nextflow.script.ProcessConfig - Config settings `withLabel:short` matches labels `short` for process with name fold_peasoup_cands_pulsarx
+Aug-09 13:06:13.526 [main] DEBUG nextflow.executor.ExecutorFactory - << taskConfig executor: slurm
+Aug-09 13:06:13.527 [main] DEBUG nextflow.executor.ExecutorFactory - >> processorType: 'slurm'
+Aug-09 13:06:13.537 [main] DEBUG nextflow.Session - Workflow process names [dsl2]: fold_peasoup_cands_pulsarx, filtool, peasoup
+Aug-09 13:06:13.540 [main] DEBUG nextflow.Session - Igniting dataflow network (4)
+Aug-09 13:06:13.563 [main] DEBUG nextflow.processor.TaskProcessor - Starting process > filtool
+Aug-09 13:06:13.565 [main] DEBUG nextflow.processor.TaskProcessor - Starting process > peasoup
+Aug-09 13:06:13.568 [PathVisitor-1] DEBUG nextflow.file.PathVisitor - files for syntax: glob; folder: /hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/; pattern: *.fil; options: [checkIfExists:true]
+Aug-09 13:06:13.570 [main] DEBUG nextflow.processor.TaskProcessor - Starting process > fold_peasoup_cands_pulsarx
+Aug-09 13:06:13.570 [main] DEBUG nextflow.script.ScriptRunner - > Awaiting termination 
+Aug-09 13:06:13.570 [main] DEBUG nextflow.Session - Session await
+Aug-09 13:06:13.599 [Actor Thread 6] ERROR nextflow.extension.OperatorImpl - @unknown
+groovy.lang.GroovyRuntimeException: Ambiguous method overloading for method java.io.File#<init>.
+Cannot resolve which method to invoke for [null] due to overlapping prototypes between:
+	[class java.lang.String]
+	[class java.net.URI]
+	at groovy.lang.MetaClassImpl.doChooseMostSpecificParams(MetaClassImpl.java:3338)
+	at groovy.lang.MetaClassImpl.chooseMostSpecificParams(MetaClassImpl.java:3314)
+	at groovy.lang.MetaClassImpl.chooseMethodInternal(MetaClassImpl.java:3304)
+	at groovy.lang.MetaClassImpl.chooseMethod(MetaClassImpl.java:3248)
+	at groovy.lang.MetaClassImpl.invokeConstructor(MetaClassImpl.java:1814)
+	at groovy.lang.MetaClassImpl.invokeConstructor(MetaClassImpl.java:1605)
+	at groovy.lang.DelegatingMetaClass.invokeConstructor(DelegatingMetaClass.java:133)
+	at org.codehaus.groovy.runtime.callsite.MetaClassConstructorSite.callConstructor(MetaClassConstructorSite.java:46)
+	at org.codehaus.groovy.runtime.callsite.CallSiteArray.defaultCallConstructor(CallSiteArray.java:59)
+	at org.codehaus.groovy.runtime.callsite.AbstractCallSite.callConstructor(AbstractCallSite.java:263)
+	at org.codehaus.groovy.runtime.callsite.AbstractCallSite.callConstructor(AbstractCallSite.java:277)
+	at Script_996ad6c4$_runScript_closure1.doCall(Script_996ad6c4:31)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.codehaus.groovy.reflection.CachedMethod.invoke(CachedMethod.java:107)
+	at groovy.lang.MetaMethod.doMethodInvoke(MetaMethod.java:323)
+	at org.codehaus.groovy.runtime.metaclass.ClosureMetaClass.invokeMethod(ClosureMetaClass.java:274)
+	at groovy.lang.MetaClassImpl.invokeMethod(MetaClassImpl.java:1035)
+	at org.codehaus.groovy.runtime.callsite.PogoMetaClassSite.call(PogoMetaClassSite.java:38)
+	at org.codehaus.groovy.runtime.callsite.CallSiteArray.defaultCall(CallSiteArray.java:47)
+	at org.codehaus.groovy.runtime.callsite.AbstractCallSite.call(AbstractCallSite.java:125)
+	at org.codehaus.groovy.runtime.callsite.AbstractCallSite.call(AbstractCallSite.java:139)
+	at nextflow.extension.MapOp$_apply_closure1.doCall(MapOp.groovy:56)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:568)
+	at org.codehaus.groovy.reflection.CachedMethod.invoke(CachedMethod.java:107)
+	at groovy.lang.MetaMethod.doMethodInvoke(MetaMethod.java:323)
+	at org.codehaus.groovy.runtime.metaclass.ClosureMetaClass.invokeMethod(ClosureMetaClass.java:274)
+	at groovy.lang.MetaClassImpl.invokeMethod(MetaClassImpl.java:1035)
+	at groovy.lang.Closure.call(Closure.java:412)
+	at groovyx.gpars.dataflow.operator.DataflowOperatorActor.startTask(DataflowOperatorActor.java:120)
+	at groovyx.gpars.dataflow.operator.DataflowOperatorActor.onMessage(DataflowOperatorActor.java:108)
+	at groovyx.gpars.actor.impl.SDAClosure$1.call(SDAClosure.java:43)
+	at groovyx.gpars.actor.AbstractLoopingActor.runEnhancedWithoutRepliesOnMessages(AbstractLoopingActor.java:293)
+	at groovyx.gpars.actor.AbstractLoopingActor.access$400(AbstractLoopingActor.java:30)
+	at groovyx.gpars.actor.AbstractLoopingActor$1.handleMessage(AbstractLoopingActor.java:93)
+	at groovyx.gpars.util.AsyncMessagingCore.run(AsyncMessagingCore.java:132)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:833)
+Aug-09 13:06:13.620 [Actor Thread 6] DEBUG nextflow.Session - Session aborted -- Cause: Ambiguous method overloading for method java.io.File#<init>.
+Cannot resolve which method to invoke for [null] due to overlapping prototypes between:
+	[class java.lang.String]
+	[class java.net.URI]
+Aug-09 13:06:13.681 [Actor Thread 6] DEBUG nextflow.Session - The following nodes are still active:
+[process] filtool
+  status=ACTIVE
+  port 0: (queue) OPEN  ; channel: -
+  port 1: (value) bound ; channel: rfi_filter
+  port 2: (value) bound ; channel: threads
+  port 3: (value) bound ; channel: telescope
+  port 4: (cntrl) -     ; channel: $
+
+[process] peasoup
+  status=ACTIVE
+  port 0: (queue) OPEN  ; channel: -
+  port 1: (value) bound ; channel: dm_file
+  port 2: (value) bound ; channel: fft_size
+  port 3: (value) bound ; channel: total_cands_limit
+  port 4: (value) bound ; channel: min_snr
+  port 5: (value) bound ; channel: acc_start
+  port 6: (value) bound ; channel: acc_end
+  port 7: (value) bound ; channel: ram_limit_gb
+  port 8: (value) bound ; channel: nh
+  port 9: (value) bound ; channel: ngpus
+  port 10: (cntrl) -     ; channel: $
+
+[process] fold_peasoup_cands_pulsarx
+  status=ACTIVE
+  port 0: (queue) OPEN  ; channel: -
+  port 1: (value) bound ; channel: pulsarx_fold_template
+  port 2: (cntrl) -     ; channel: $
+
+Aug-09 13:06:13.684 [main] DEBUG nextflow.Session - Session await > all processes finished
+Aug-09 13:06:13.684 [main] DEBUG nextflow.Session - Session await > all barriers passed
+Aug-09 13:06:13.688 [main] DEBUG nextflow.trace.WorkflowStatsObserver - Workflow completed > WorkflowStats[succeededCount=0; failedCount=0; ignoredCount=0; cachedCount=0; pendingCount=0; submittedCount=0; runningCount=0; retriesCount=0; abortedCount=0; succeedDuration=0ms; failedDuration=0ms; cachedDuration=0ms;loadCpus=0; loadMemory=0; peakRunning=0; peakCpus=0; peakMemory=0; ]
+Aug-09 13:06:13.838 [main] DEBUG nextflow.cache.CacheDB - Closing CacheDB done
+Aug-09 13:06:13.927 [main] DEBUG nextflow.script.ScriptRunner - > Execution complete -- Goodbye
