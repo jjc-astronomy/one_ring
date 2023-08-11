@@ -32,6 +32,9 @@ fil_files_channel = Channel.fromPath( "${params.fil_files}", checkIfExists: true
         return tuple(file, POINTING, BAND, UTC_OBS, BEAM)
     }
 
+
+//fil_files_channel.view
+
 // Split the channel to get only the file for filtool
 //only_file_channel = fil_files_channel.map { it[0] }
 
@@ -119,6 +122,7 @@ process fold_peasoup_cands_pulsarx {
 
 workflow {
 
+    
     filtool_output= filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)

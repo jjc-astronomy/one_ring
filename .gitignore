@@ -2,4 +2,4 @@ work/
 RESULTS/
 *.fil
 *.html
-
+.nextflow*
