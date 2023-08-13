@@ -3,6 +3,7 @@ import sys, os, subprocess
 import argparse
 import pandas as pd
 import numpy as np
+from multiprocessing import Pool, cpu_count
 
 
 
@@ -33,20 +34,56 @@ def a_to_pdot(P_s, acc_ms2):
 
 
 
+def run_prepfold(args):
+    row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask = args
+    peasoup_period = row['period']
+    peasoup_acceleration = row['acc']
+    pdot = a_to_pdot(peasoup_period, peasoup_acceleration)  
+    fold_period = period_correction_for_prepfold(peasoup_period, pdot, tsamp, fft_size)  
+    output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'])
+    dm = row['dm']
 
-def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix):
-    for index, row in df.iterrows():
-        peasoup_period = row['period']
-        peasoup_acceleration = row['acc']
-        pdot = a_to_pdot(peasoup_period, peasoup_acceleration)
-        fold_period = period_correction_for_prepfold(peasoup_period, pdot, tsamp, fft_size)
-        output_filename =  source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'])
-        dm = row['dm']
-        if args.mask_file:
-            cmd = "prepfold -fixchi -noxwin -topo -n 64 -mask %s -p %.16f -dm %.2f -pd %.16f -o %s %s" %(args.mask_file, fold_period, dm, pdot, output_filename, filterbank_file)
-        else:
-            cmd = "prepfold -fixchi -noxwin -topo -n 64 -p %.16f -dm %.2f -pd %.16f -o %s %s" %(fold_period, dm, pdot, output_filename, filterbank_file)
+    if rfifind_mask is not None:
+        cmd = "prepfold -fixchi -noxwin -topo -n 64 -mask %s -p %.16f -dm %.2f -pd %.16f -o %s %s" % (rfifind_mask, fold_period, dm, pdot, output_filename, filterbank_file)
+    else:
+        cmd = "prepfold -fixchi -noxwin -topo -n 64 -p %.16f -dm %.2f -pd %.16f -o %s %s" % (fold_period, dm, pdot, output_filename, filterbank_file)
+
+    try:
         subprocess.check_output(cmd, shell=True)
+        return (True, row['cand_id_in_file'])
+    except subprocess.CalledProcessError as e:
+        return (False, row['cand_id_in_file'], str(e))
+
+def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask=None):
+    num_cores = min(cpu_count(), len(df))  # Use all available cores but no more than the number of rows
+    args_list = [(row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask) for _, row in df.iterrows()]
+
+    pool = Pool(num_cores)
+    results = pool.map(run_prepfold, args_list)
+    pool.close()
+    pool.join()
+
+    for result in results:
+        if not result[0]:  # If success is False
+            print("Error with candidate ID %s: %s" % (result[1], result[2]))
+
+
+
+
+# Prepfold serial version
+# def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask=None):
+#     for index, row in df.iterrows():
+#         peasoup_period = row['period']
+#         peasoup_acceleration = row['acc']
+#         pdot = a_to_pdot(peasoup_period, peasoup_acceleration)
+#         fold_period = period_correction_for_prepfold(peasoup_period, pdot, tsamp, fft_size)
+#         output_filename =  source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'])
+#         dm = row['dm']
+#         if rfifind_mask is not None:
+#             cmd = "prepfold -fixchi -noxwin -topo -n 64 -mask %s -p %.16f -dm %.2f -pd %.16f -o %s %s" %(rfifind_mask, fold_period, dm, pdot, output_filename, filterbank_file)
+#         else:
+#             cmd = "prepfold -fixchi -noxwin -topo -n 64 -p %.16f -dm %.2f -pd %.16f -o %s %s" %(fold_period, dm, pdot, output_filename, filterbank_file)
+#         subprocess.check_output(cmd, shell=True)
 
 
 def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, fast_nbins, slow_nbins, subint_length, nsubband, utc_beam, beam_name, pulsarx_threads, TEMPLATE, cmask=None):
@@ -133,7 +170,7 @@ def main():
     PulsarX_Template = args.pulsarx_fold_template
 
     if args.fold_technique == 'presto':
-        fold_with_presto(df, args.filterbank_file, tsamp, fft_size, source_name_prefix)
+        fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix)
     else:
         fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, args.fast_nbins, args.slow_nbins, args.subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template, args.chan_mask)
 

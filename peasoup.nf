@@ -1,30 +1,6 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-params.fil_files = "/hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/*.fil"
-params.fft_size = "8388608"
-params.dm_file = "/hercules/scratch/vishnu/NEXTFLOW/dm_file.txt"
-params.search_singularity_image = "/hercules/scratch/vishnu/singularity_images/peasoup_latest.sif"
-//params.fold_singularity_image = "/u/vishnu/singularity_images/presto_gpu.sif"
-params.fold_singularity_image = "/u/vishnu/singularity_images/pulsarx_latest.sif"
-params.pulsarx_fold_template="/hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/meerkat_fold.template"
-params.fold_script = "/hercules/scratch/vishnu/NEXTFLOW/compact_nextflow/fold_peasoup_candidates.py"
-params.min_snr = "8.0"
-params.acc_start = "-50.0"
-params.acc_end = "50.0"
-params.ram_limit_gb = "60.0"
-params.nh = "4"
-params.ngpus = "1"
-params.total_cands_limit = "100000"
-params.telescope = "meerkat"
-
-// fil_files_channel = Channel.fromPath( "${params.fil_files}", checkIfExists: true )
-//     .map { file -> 
-//         def (POINTING, BAND, UTC_OBS, BEAM) = file.name.tokenize('_')
-//         BEAM = new File(BEAM).baseName
-//         return tuple(file, POINTING, BAND, UTC_OBS, BEAM, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
-//     }
-
 fil_files_channel = Channel.fromPath( "${params.fil_files}", checkIfExists: true )
     .map { file -> 
         def (POINTING, BAND, UTC_OBS, BEAM) = file.name.tokenize('_')
@@ -32,11 +8,6 @@ fil_files_channel = Channel.fromPath( "${params.fil_files}", checkIfExists: true
         return tuple(file, POINTING, BAND, UTC_OBS, BEAM)
     }
 
-
-//fil_files_channel.view
-
-// Split the channel to get only the file for filtool
-//only_file_channel = fil_files_channel.map { it[0] }
 
 
 fil_files_channel.view( it -> "Running search on ${it[0]}" ) 
@@ -59,6 +30,26 @@ process filtool {
     filtool -t ${threads} --telescope ${telescope} -z ${rfi_filter} --cont -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM} -f ${fil_file} 
     """
 }
+
+// process rfifind{
+//     label 'short'
+//     container "${params.presto_singularity_image}"
+//     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/02_RFIFIND/", pattern: "*.rfifind*", mode: 'copy'
+
+//     input:
+//     tuple path(fil_file), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+//     val threads, val time, val timesig, val freqsig, val intfrac, val chanfrac
+
+//     output:
+//     tuple path("${POINTING}_${BAND}_${UTC_OBS}_${BEAM}_rfifind.mask"), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+
+//     script:
+//     """
+//     rfifind -nooffsets -noscales -time ${time} -timesig ${timesig} -freqsig ${freqsig} -intfrac ${intfrac} -chanfrac ${chanfrac} -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM}_rfifind -ncpus ${threads} ${fil_file}
+//     """
+
+
+// }
 
 
 
@@ -120,12 +111,33 @@ process fold_peasoup_cands_pulsarx {
 
 }
 
+process prepfold {
+    label 'short'
+    container "${params.presto_singularity_image}"
+    publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/05_FOLDING/", pattern: '*.pfd*', mode: 'copy'
+
+    input:
+    tuple path(peasoup_xml_out), path(input_file), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+
+    output:
+    path("*.pfd*")
+
+    script:
+    """
+    python ${params.fold_script} -i ${peasoup_xml_out} -t presto -b ${BEAM}
+    """
+
+
+
+}
+
 workflow {
 
     
     filtool_output= filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)
+    prepfold(peasoup_results)
 
 
 }
