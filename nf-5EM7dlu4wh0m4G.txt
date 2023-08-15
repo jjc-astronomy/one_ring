@@ -1,0 +1,4 @@
+N E X T F L O W  ~  version 23.04.3
+ERROR ~ Unknown network host: api.tower.nf
+
+ -- Check 'nf-5EM7dlu4wh0m4G.log' file for details
