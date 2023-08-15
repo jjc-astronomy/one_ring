@@ -54,8 +54,9 @@ def run_prepfold(args):
     except subprocess.CalledProcessError as e:
         return (False, row['cand_id_in_file'], str(e))
 
-def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask=None):
-    num_cores = min(cpu_count(), len(df))  # Use all available cores but no more than the number of rows
+def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, prepfold_threads, rfifind_mask=None):
+    #num_cores = min(cpu_count(), len(df))  # Use all available cores but no more than the number of rows
+    num_cores = min(prepfold_threads, len(df))  # Use all available cores but no more than the number of rows
     args_list = [(row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask) for _, row in df.iterrows()]
 
     pool = Pool(num_cores)
@@ -132,7 +133,8 @@ def main():
     parser.add_argument('-b', '--beam_name', help='Beam name string', type=str, default='cfbf00000')
     parser.add_argument('-utc', '--utc_beam', help='UTC beam name string', type=str, default='2024-01-01-00:00:00')
     parser.add_argument('-c', '--chan_mask', help='Peasoup Channel mask file to be passed onto pulsarx', type=str, default='')
-    parser.add_argument('-threads', '--pulsarx_threads', help='Number of threads to be used for pulsarx', type=str, default='24')
+    parser.add_argument('-threads', '--pulsarx_threads', help='Number of threads to be used for pulsarx', type=int, default='24')
+    parser.add_argument('-pthreads', '--presto_threads', help='Number of threads to be used for prepfold', type=int, default='12')
     parser.add_argument('-p', '--pulsarx_fold_template', help='Fold template pulsarx', type=str, default='meerkat_fold.template')
 
     args = parser.parse_args()
@@ -147,7 +149,7 @@ def main():
     header_params = root[1]
     search_params = root[2]
     candidates = root[6]
-
+    prepfold_threads = args.presto_threads
     filterbank_file = str(search_params.find("infilename").text)
     tsamp = float(header_params.find("tsamp").text)
     fft_size = int(search_params.find("size").text)
@@ -170,7 +172,7 @@ def main():
     PulsarX_Template = args.pulsarx_fold_template
 
     if args.fold_technique == 'presto':
-        fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix)
+        fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, prepfold_threads)
     else:
         fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, args.fast_nbins, args.slow_nbins, args.subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template, args.chan_mask)
 

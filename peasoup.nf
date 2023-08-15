@@ -13,8 +13,9 @@ fil_files_channel = Channel.fromPath( "${params.fil_files}", checkIfExists: true
 fil_files_channel.view( it -> "Running search on ${it[0]}" ) 
 
 process filtool {
-    label 'short'
+    label 'filtool'
     container "${params.fold_singularity_image}"
+    //scratch "${params.tmp_dir}"
 
     input:
     tuple path(fil_file), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
@@ -56,6 +57,7 @@ process filtool {
 process peasoup {
     label 'gpu_short'
     container "${params.search_singularity_image}"
+    //scratch "${params.tmp_dir}"
     // This will only publish the XML files
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/03_SEARCH/", pattern: "**/*.xml", mode: 'copy'
 
@@ -87,8 +89,9 @@ process peasoup {
 
 
 process fold_peasoup_cands_pulsarx {
-    label 'short'
+    label 'filtool'
     container "${params.fold_singularity_image}"
+    //scratch "${params.tmp_dir}"
     //publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: '*.ar,*.png', mode: 'copy'
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: "*.ar", mode: 'copy'
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: "*.png", mode: 'copy'
@@ -106,14 +109,15 @@ process fold_peasoup_cands_pulsarx {
 
     script:
     """
-    python3 ${params.fold_script} -i ${peasoup_xml_out} -t pulsarx -p ${pulsarx_fold_template} -b ${BEAM}
+    python3 ${params.fold_script} -i ${peasoup_xml_out} -t pulsarx -p ${pulsarx_fold_template} -b ${BEAM} -threads 4
     """
 
 }
 
 process prepfold {
-    label 'short'
+    label 'filtool'
     container "${params.presto_singularity_image}"
+    //scratch "${params.tmp_dir}"
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/05_FOLDING/", pattern: '*.pfd*', mode: 'copy'
 
     input:
@@ -124,7 +128,7 @@ process prepfold {
 
     script:
     """
-    python ${params.fold_script} -i ${peasoup_xml_out} -t presto -b ${BEAM}
+    python ${params.fold_script} -i ${peasoup_xml_out} -t presto -b ${BEAM} -pthreads 4
     """
 
 
@@ -133,8 +137,7 @@ process prepfold {
 
 workflow {
 
-    
-    filtool_output= filtool(fil_files_channel, "zdot", "12", params.telescope)
+    filtool_output = filtool(fil_files_channel, "zdot", "6", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)
     prepfold(peasoup_results)
