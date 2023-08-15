@@ -40,7 +40,7 @@ def run_prepfold(args):
     peasoup_acceleration = row['acc']
     pdot = a_to_pdot(peasoup_period, peasoup_acceleration)  
     fold_period = period_correction_for_prepfold(peasoup_period, pdot, tsamp, fft_size)  
-    output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'])
+    output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'] + 1) # Start indexing from 1 to match pulsarX
     dm = row['dm']
 
     if rfifind_mask is not None:
@@ -114,8 +114,8 @@ def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, 
                 raise Exception("Unable to parse channel mask: {}".format(
                     str(error)))
     
-    script = "psrfold_fil --plotx -v -t {} --candfile {} -n {} {} {} --template {} --clfd 2.0 -L {} -f {} --rfi zdot {}-o {}".format(
-              pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE, subint_length, input_filenames, zap_string, output_rootname)
+    script = "psrfold_fil --plotx -v -t {} --candfile {} -n {} {} {} --template {} --clfd 2.0 -L {} -f {} --rfi zdot {}-o {} --srcname {}".format(
+              pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE, subint_length, input_filenames, zap_string, output_rootname, source_name_prefix)
     subprocess.check_output(script, shell=True)
     #print(script)
 
