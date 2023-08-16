@@ -28,7 +28,7 @@ process filtool {
 
     script:
     """
-    filtool -t ${threads} --telescope ${telescope} -z ${rfi_filter} --cont -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM} -f ${fil_file} 
+    filtool -t ${threads} --telescope ${telescope} -z ${rfi_filter} --cont -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM} -f ${fil_file} -s ${POINTING} 
     """
 }
 
@@ -55,9 +55,8 @@ process filtool {
 
 
 process peasoup {
-    label 'gpu_short'
+    label 'peasoup'
     container "${params.search_singularity_image}"
-    //scratch "${params.tmp_dir}"
     // This will only publish the XML files
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/03_SEARCH/", pattern: "**/*.xml", mode: 'copy'
 
@@ -115,7 +114,7 @@ process fold_peasoup_cands_pulsarx {
 }
 
 process prepfold {
-    label 'filtool'
+    label 'prepfold'
     container "${params.presto_singularity_image}"
     //scratch "${params.tmp_dir}"
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/05_FOLDING/", pattern: '*.pfd*', mode: 'copy'
@@ -137,7 +136,7 @@ process prepfold {
 
 workflow {
 
-    filtool_output = filtool(fil_files_channel, "zdot", "6", params.telescope)
+    filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)
     prepfold(peasoup_results)

@@ -1,5 +1,6 @@
 work/
 RESULTS/
+OLD_RESULTS/
 *.fil
 *.html
 .nextflow*

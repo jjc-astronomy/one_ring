@@ -40,7 +40,8 @@ def run_prepfold(args):
     peasoup_acceleration = row['acc']
     pdot = a_to_pdot(peasoup_period, peasoup_acceleration)  
     fold_period = period_correction_for_prepfold(peasoup_period, pdot, tsamp, fft_size)  
-    output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(row['cand_id_in_file'] + 1) # Start indexing from 1 to match pulsarX
+    
+    output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(int(row['cand_id_in_file']) + 1) # Start indexing from 1 to match pulsarX
     dm = row['dm']
 
     if rfifind_mask is not None:
