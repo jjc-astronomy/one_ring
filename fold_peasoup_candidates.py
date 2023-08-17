@@ -166,7 +166,7 @@ def main():
     filterbank_file = str(search_params.find("infilename").text)
     tsamp = float(header_params.find("tsamp").text)
     fft_size = int(search_params.find("size").text)
-    nsamples = int(search_params.find("nsamples").text)
+    nsamples = int(root.find("header_parameters/nsamples").text)
     tstart = float(header_params.find("tstart").text)
     source_name_prefix = str(header_params.find("source_name").text).strip()
   
