@@ -1,4 +1,0 @@
-N E X T F L O W  ~  version 23.04.2
-Pulling erc-compact/compact_nextflow ...
- downloaded from https://github.com/erc-compact/compact_nextflow.git
-Project `erc-compact/compact_nextflow` is currently stickied on revision: main -- you need to explicitly specify a revision with the option `-r` in order to use it

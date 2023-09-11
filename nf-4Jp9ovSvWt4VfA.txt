@@ -1,6 +1,0 @@
-N E X T F L O W  ~  version 23.04.2
-Pulling erc-compact/compact_nextflow ...
- downloaded from https://github.com/erc-compact/compact_nextflow.git
-ERROR ~ Unknown method invocation `error` on _parse_closure5 type
-
- -- Check 'nf-4Jp9ovSvWt4VfA.log' file for details
