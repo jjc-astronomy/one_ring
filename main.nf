@@ -88,7 +88,7 @@ process peasoup {
 
 
 process fold_peasoup_cands_pulsarx {
-    label 'filtool'
+    label 'pulsarx'
     container "${params.fold_singularity_image}"
     //scratch "${params.tmp_dir}"
     //publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: '*.ar,*.png', mode: 'copy'
@@ -134,14 +134,33 @@ process prepfold {
 
 }
 
-workflow {
+process readfile_parser {
+    container "${params.presto_singularity_image}"
+    input:
+    tuple path(fil_file), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+
+    output:
+    stdout 
+
+    script:
+    """
+    bash ${params.readfile_parser} -f ${fil_file}
+    """
+}
+
+
+
+ 
+ workflow {   
 
     filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)
     prepfold(peasoup_results)
 
-
 }
+
+
+
 
 

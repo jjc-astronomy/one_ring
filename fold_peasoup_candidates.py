@@ -130,8 +130,8 @@ def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, 
     
     script = "psrfold_fil --plotx -v -t {} --candfile {} -n {} {} {} --template {} --clfd 2.0 -L {} -f {} --rfi zdot {}-o {} --srcname {} --pepoch {}".format(
               pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE, subint_length, input_filenames, zap_string, output_rootname, source_name_prefix, tstart)
-    subprocess.check_output(script, shell=True)
-
+    #subprocess.check_output(script, shell=True)
+    print(script)
 def main():
     parser = argparse.ArgumentParser(description='Fold all candidates from Peasoup xml file')
     parser.add_argument('-o', '--output_path', help='Output path to save results',  default=os.getcwd(), type=str)
@@ -141,7 +141,7 @@ def main():
     parser.add_argument('-n', '--nh', help='Filter candidates with nh value', type=int, default=0)
     parser.add_argument('-f', '--fast_nbins', help='High profile bin limit for slow-spinning pulsars', type=int, default=128)
     parser.add_argument('-s', '--slow_nbins', help='Low profile bin limit for fast-spinning pulsars', type=int, default=64)
-    parser.add_argument('-sub', '--subint_length', help='Subint length (s)', type=int, default=10)
+    parser.add_argument('-sub', '--subint_length', help='Subint length (s). Default is tobs/64', type=int, default=None)
     parser.add_argument('-nsub', '--nsubband', help='Number of subbands', type=int, default=64)
     parser.add_argument('-b', '--beam_name', help='Beam name string', type=str, default='cfbf00000')
     parser.add_argument('-utc', '--utc_beam', help='UTC beam name string', type=str, default='2024-01-01-00:00:00')
@@ -186,10 +186,16 @@ def main():
     df = df[df['nh'] >= args.nh]
     PulsarX_Template = args.pulsarx_fold_template
 
+
     if args.fold_technique == 'presto':
         fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, prepfold_threads)
     else:
-        fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, tstart, args.fast_nbins, args.slow_nbins, args.subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template,  args.chan_mask)
+        if args.subint_length is None:
+            subint_length = int(nsamples * tsamp / 64)
+        else:
+            subint_length = args.subint_length
+
+        fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, tstart, args.fast_nbins, args.slow_nbins, subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template,  args.chan_mask)
 
 
 
