@@ -1,0 +1,30 @@
+Sep-11 18:51:43.276 [main] DEBUG nextflow.cli.Launcher - $> nextflow run 'https://github.com/erc-compact/compact_nextflow' -name distraught_mestorf -with-tower -profile hercules -main-script main.nf -latest
+Sep-11 18:51:43.325 [main] INFO  nextflow.cli.CmdRun - N E X T F L O W  ~  version 23.04.2
+N E X T F L O W  ~  version 23.04.2
+Sep-11 18:51:43.467 [main] DEBUG nextflow.plugin.PluginsFacade - Setting up plugin manager > mode=prod; embedded=false; plugins-dir=/u/vishnu/.nextflow/plugins; core-plugins: nf-amazon@1.16.2,nf-azure@1.0.1,nf-codecommit@0.1.4,nf-console@1.0.5,nf-ga4gh@1.0.5,nf-google@1.7.3,nf-tower@1.5.12,nf-wave@0.8.3
+Sep-11 18:51:43.607 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Enabled plugins: []
+Sep-11 18:51:43.608 [main] INFO  org.pf4j.DefaultPluginStatusProvider - Disabled plugins: []
+Sep-11 18:51:43.615 [main] INFO  org.pf4j.DefaultPluginManager - PF4J version 3.4.1 in 'deployment' mode
+Sep-11 18:51:43.880 [main] INFO  org.pf4j.AbstractPluginManager - No plugins
+Sep-11 18:51:44.203 [main] DEBUG nextflow.scm.ProviderConfig - Detected SCM custom path: https://api.tower.nf/ephemeral/jfFJ8JnxtbW6kTCr8HhMTA
+Sep-11 18:51:49.858 [main] DEBUG nextflow.scm.ProviderConfig - Detected SCM config: [providers:[github:[user:tower-nf, password:ghp****], gitlab:[user:pditommaso, password:****, token:BZ8****], fake:[server:http://localhost:9900, platform:github], bitbucket:[user:pditommaso, password:****]]]
+Sep-11 18:51:49.869 [main] DEBUG nextflow.scm.RepositoryFactory - Found Git repository result: [RepositoryFactory]
+Sep-11 18:51:50.462 [main] DEBUG nextflow.scm.RepositoryFactory - Git url=nextflow.scm.GitUrl(https, null, github.com, erc-compact/compact_nextflow) -> config=ProviderConfig[name: github, platform: github, server: https://github.com]
+Sep-11 18:51:50.462 [main] DEBUG nextflow.scm.AssetManager - Repository URL: https://github.com/erc-compact/compact_nextflow; Project: erc-compact/compact_nextflow; Hub provider: github
+Sep-11 18:51:50.478 [main] INFO  nextflow.cli.CmdRun - Pulling erc-compact/compact_nextflow ...
+Pulling erc-compact/compact_nextflow ...
+Sep-11 18:51:50.481 [main] DEBUG nextflow.scm.RepositoryProvider - Request [credentials ****:ghp****] -> https://api.github.com/repos/erc-compact/compact_nextflow/contents/nextflow.config
+Sep-11 18:51:51.163 [main] DEBUG nextflow.scm.RepositoryProvider - Request [credentials ****:ghp****] -> https://api.github.com/repos/erc-compact/compact_nextflow/contents/main.nf
+Sep-11 18:51:51.346 [main] DEBUG nextflow.scm.RepositoryProvider - Request [credentials ****:ghp****] -> https://api.github.com/repos/erc-compact/compact_nextflow
+Sep-11 18:51:51.555 [main] DEBUG nextflow.scm.AssetManager - Pulling erc-compact/compact_nextflow -- Using remote clone url: https://github.com/erc-compact/compact_nextflow.git
+Sep-11 18:51:53.585 [main] INFO  nextflow.cli.CmdRun -  downloaded from https://github.com/erc-compact/compact_nextflow.git
+ downloaded from https://github.com/erc-compact/compact_nextflow.git
+Project `erc-compact/compact_nextflow` is currently stickied on revision: main -- you need to explicitly specify a revision with the option `-r` in order to use it
+Sep-11 18:51:53.597 [main] DEBUG nextflow.cli.Launcher - Operation aborted
+nextflow.exception.AbortOperationException: Project `erc-compact/compact_nextflow` is currently stickied on revision: main -- you need to explicitly specify a revision with the option `-r` in order to use it
+	at nextflow.scm.AssetManager.checkout(AssetManager.groovy:909)
+	at nextflow.cli.CmdRun.getScriptFile0(CmdRun.groovy:532)
+	at nextflow.cli.CmdRun.getScriptFile(CmdRun.groovy:458)
+	at nextflow.cli.CmdRun.run(CmdRun.groovy:314)
+	at nextflow.cli.Launcher.run(Launcher.groovy:494)
+	at nextflow.cli.Launcher.main(Launcher.groovy:653)
