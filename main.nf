@@ -90,8 +90,6 @@ process peasoup {
 process fold_peasoup_cands_pulsarx {
     label 'pulsarx'
     container "${params.fold_singularity_image}"
-    //scratch "${params.tmp_dir}"
-    //publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: '*.ar,*.png', mode: 'copy'
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: "*.ar", mode: 'copy'
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/04_FOLDING/", pattern: "*.png", mode: 'copy'
 
@@ -116,7 +114,6 @@ process fold_peasoup_cands_pulsarx {
 process prepfold {
     label 'prepfold'
     container "${params.presto_singularity_image}"
-    //scratch "${params.tmp_dir}"
     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/05_FOLDING/", pattern: '*.pfd*', mode: 'copy'
 
     input:
@@ -147,12 +144,25 @@ process readfile_parser {
     bash ${params.readfile_parser} -f ${fil_file}
     """
 }
+def fieldNames = ['Telescope', 'Pointing', 'START_UTC', 'MJD', 'RA_STR_J2000', 'DEC_STR_J2000', 'RA_DEG_J2000', 'DEC_DEG_J2000', 'TSAMP', 'CENTRAL_FREQ', 'LOW_CHAN_MHz', 'HIGH_CHAN_MHz', 'CHAN_BW_MHz', 'NUM_CHAN', 'BW_MHz', 'NBIT', 'NSAMPLES', 'TOBS']
 
-
-
+include { fromQuery } from 'plugin/nf-sqldb'
+include { sqlInsert } from 'plugin/nf-sqldb'
  
  workflow {   
 
+    outputChannel = readfile_parser(fil_files_channel).splitCsv()
+    outputChannel.flatMap{it ->
+    def metadata = [:]
+    [fieldNames, it].transpose().each { fieldName, value ->
+        metadata[fieldName] = value
+    }
+    return metadata
+    }.view()
+ 
+    query = 'SELECT * from telescope'
+    query = 'Describe Pointing'
+    channel.fromQuery(query, db: 'compact').view()
     filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
     fold_peasoup_cands_pulsarx(peasoup_results, params.pulsarx_fold_template)

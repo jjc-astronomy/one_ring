@@ -4,3 +4,4 @@ OLD_RESULTS/
 *.fil
 *.html
 .nextflow*
+secrets.config
