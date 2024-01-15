@@ -28,12 +28,13 @@ connection_url = URL.create(
     port=DB_PORT
 )
 # Set up the engine and base
-engine = create_engine(connection_url)
+engine = create_engine(connection_url, echo=False)
 metadata_obj = MetaData()
 #telescope_table = Table("telescope", metadata_obj, autoload_with=engine)
 target_table = Table("target", metadata_obj, autoload_with=engine)
 pointing_table = Table("pointing", metadata_obj, autoload_with=engine)
-stmt = select(pointing_table)
+beam_table = Table("beam", metadata_obj, autoload_with=engine)
+stmt = select(beam_table)
 
 #Delete all rows from the table
 #stmt = telescope_table.delete()
@@ -48,7 +49,7 @@ with engine.connect() as conn:
     for row in result:
         print(row)
 
-# sys.exit()
+
 
 # #Orm method
 # session = Session(engine)
@@ -177,6 +178,128 @@ def insert_pointing(engine, utc_start_str, tobs, nchans, freq_band, target_name,
         else:
             print(f"Pointing for {target_name} at {utc_start} already exists in pointing table. Skipping...")
 
+def insert_beam_types(engine, beam_type_name, description=None):
+    '''
+    Insert a new beam type into the beam_types table if it doesn't already exist
+    '''
+    metadata_obj = MetaData()
+    beam_type_table = Table("beam_types", metadata_obj, autoload_with=engine)
+    with engine.connect() as conn:
+        
+        stmt = select(beam_type_table).where(beam_type_table.c.name == beam_type_name).limit(1)
+        result = conn.execute(stmt).first()
+        
+        if result is None:
+            stmt = insert(beam_type_table).values(name=beam_type_name, description=description)
+            conn.execute(stmt)
+            conn.commit()
+            print(f"Added {beam_type_name} to beam_type table")
+        else:
+            print(f"{beam_type_name} already exists in beam_type table. Skipping...")
+
+def get_pointing_id(engine, target_name, utc_start_str, project_name, telescope_name):
+    '''
+    Get the pointing id for a given target, project, telescope and utc_start
+    '''
+    metadata_obj = MetaData()
+    pointing_table = Table("pointing", metadata_obj, autoload_with=engine)
+    target_table = Table("target", metadata_obj, autoload_with=engine)
+    telescope_table = Table("telescope", metadata_obj, autoload_with=engine)
+    project_table = Table("project", metadata_obj, autoload_with=engine)
+    
+    utc_start = datetime.strptime(utc_start_str, '%Y-%m-%d-%H:%M:%S.%f')
+    utc_start = utc_start.replace(microsecond=0)
+
+    with engine.connect() as conn:
+        #join target and project tables
+        stmt = (
+            select(pointing_table.c.id)
+            .join(target_table, target_table.c.id == pointing_table.c.target_id)
+            .join(project_table, project_table.c.id == pointing_table.c.project_id)
+            .join(telescope_table, telescope_table.c.id == pointing_table.c.telescope_id)
+            .where(target_table.c.source_name == target_name)
+            .where(project_table.c.name == project_name)
+            .where(telescope_table.c.name == telescope_name)
+            .where(pointing_table.c.utc_start == utc_start)
+            .limit(1)
+        )
+        result = conn.execute(stmt).first()
+        if result is None:
+            return None
+        else:
+            return result[0]
+    
+def insert_beam(engine, beam_name, beam_ra, beam_dec, beam_ra_str, beam_dec_str, pointing_id, beam_type_id):
+    '''
+    Insert a new beam into the beams table if it doesn't already exist
+    '''
+    metadata_obj = MetaData()
+    beam_table = Table("beam", metadata_obj, autoload_with=engine)
+    beam_types_table = Table("beam_types", metadata_obj, autoload_with=engine)
+    pointing_table = Table("pointing", metadata_obj, autoload_with=engine)
+    with engine.connect() as conn:
+        stmt = select(beam_table).where(beam_table.c.name == beam_name).where(beam_table.c.pointing_id == pointing_id).where(beam_table.c.beam_type_id == beam_type_id).limit(1)
+        result = conn.execute(stmt).first()
+        
+        if result is None:
+            stmt = insert(beam_table).values(name=beam_name, ra=beam_ra, dec=beam_dec, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id)
+            conn.execute(stmt)
+            conn.commit()
+            print(f"Added {beam_name} to beam table")
+        else:
+            print(f"{beam_name} already exists in beam table. Skipping...")
+
+def insert_beam_without_pointing_id(engine, beam_name, beam_ra, beam_dec, beam_ra_str, beam_dec_str, beam_type_name, utc_start_str, project_name, telescope_name, target_name):
+    '''
+    Insert a new beam into the beams table if it doesn't already exist
+    '''
+    metadata_obj = MetaData()
+    beam_table = Table("beam", metadata_obj, autoload_with=engine)
+    beam_types_table = Table("beam_types", metadata_obj, autoload_with=engine)
+    pointing_table = Table("pointing", metadata_obj, autoload_with=engine)
+    target_table = Table("target", metadata_obj, autoload_with=engine)
+    project_table = Table("project", metadata_obj, autoload_with=engine)
+    telescope_table = Table("telescope", metadata_obj, autoload_with=engine)
+
+    utc_start = datetime.strptime(utc_start_str, '%Y-%m-%d-%H:%M:%S.%f')
+    utc_start = utc_start.replace(microsecond=0)
+
+    with engine.connect() as conn:
+
+        stmt = (
+            select(beam_table)
+            .join(beam_types_table, beam_types_table.c.id == beam_table.c.beam_type_id)
+            .join(pointing_table, pointing_table.c.id == beam_table.c.pointing_id)
+            .join(target_table, target_table.c.id == pointing_table.c.target_id)
+            .join(project_table, project_table.c.id == pointing_table.c.project_id)
+            .join(telescope_table, telescope_table.c.id == pointing_table.c.telescope_id)
+            .where(beam_table.c.name == beam_name)
+            .where(pointing_table.c.utc_start == utc_start)
+            .where(target_table.c.source_name == target_name)
+            .where(project_table.c.name == project_name)
+            .where(telescope_table.c.name == telescope_name)
+            .limit(1)
+        )
+        
+        result = conn.execute(stmt).first()
+        
+       
+        if result is None:
+            #get beam type id
+            stmt = select(beam_types_table).where(beam_types_table.c.name == beam_type_name).limit(1)
+            result = conn.execute(stmt).first()
+            beam_type_id = result[0]
+            #get pointing id
+            stmt = select(pointing_table).join(target_table, target_table.c.id == pointing_table.c.target_id).join(project_table, project_table.c.id == pointing_table.c.project_id).join(telescope_table, telescope_table.c.id == pointing_table.c.telescope_id).where(pointing_table.c.utc_start == utc_start).where(target_table.c.source_name == target_name).where(project_table.c.name == project_name).where(telescope_table.c.name == telescope_name).where(pointing_table.c.utc_start == utc_start).limit(1)
+            result = conn.execute(stmt).first()
+            pointing_id = result[0]
+            stmt = insert(beam_table).values(name=beam_name, ra=beam_ra, dec=beam_dec, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id)
+            conn.execute(stmt)
+            conn.commit()
+            print(f"Added {beam_name} to beam table")
+        else:
+            print(f"{beam_name} already exists in beam table. Skipping...")
+
 # insert_telescope_name(engine, "MeerKAT", "Radio Inteferometer in South Africa")
 # insert_telescope_name(engine, "Effelsberg", "Single-Dish Radio telescope in Germany")
 # insert_telescope_name(engine, "Parkes", "Single-Dish Radio telescope in Australia")
@@ -184,10 +307,12 @@ def insert_pointing(engine, utc_start_str, tobs, nchans, freq_band, target_name,
 #delete_all_rows(engine, "pointing")
 #reset_primary_key_counter(engine, "pointing")
 # insert_target_name(engine, "J2140-2310A", "21:40:22.4100", "-23:10:48.8000", "TRAPUM_GC_SEARCHES", "APSUSE Observation with beam on M30A")
-insert_pointing(engine, "2021-01-30-11:44:01.05986", 3573.05229549, 4096, "L", "J2140-2310A", 900, 1500, 0.000256, "MeerKAT", "TRAPUM_GC_SEARCHES", "L-band")
-
-
-
+#insert_pointing(engine, "2021-01-30-11:44:01.05986", 3573.05229549, 4096, "L", "J2140-2310A", 900, 1500, 0.000256, "MeerKAT", "TRAPUM_GC_SEARCHES", "L-band")
+#insert_beam_types(engine, "Stokes_I", "Total Intensity Beam")
+#id = get_pointing_id(engine, "J2140-2310A", "2021-01-30-11:44:01.05986", "TRAPUM_GC_SEARCHES", "MeerKAT")
+#insert_beam(engine, "cfbf00000", 325.093375, -23.18022222222222, "21:40:22.4100", "-23:10:48.8000", "Stokes_I")
+insert_beam_without_pointing_id(engine, "cfbf00002", 325.093375, -23.18022222222222, "21:40:22.4100", "-23:10:48.8000", "Stokes_I", "2021-01-30-11:44:01.05986", "TRAPUM_GC_SEARCHES", "MeerKAT", "J2140-2310A")
+insert_beam(engine, "cfbf00002", 325.093375, -23.18022222222222, "21:40:22.4100", "-23:10:48.8000", 1, 1)
 # # printable_query = query_get_filterbank_files 
 # # print(printable_query)
 
