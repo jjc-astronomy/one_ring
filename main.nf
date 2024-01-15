@@ -158,10 +158,12 @@ include { sqlInsert } from 'plugin/nf-sqldb'
         metadata[fieldName] = value
     }
     return metadata
-    }.view()
+    }
+
+    outputChannel.view()
  
-    query = 'SELECT * from telescope'
-    query = 'Describe Pointing'
+    query = 'select * from project'
+    //query = 'show tables'
     channel.fromQuery(query, db: 'compact').view()
     filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
     peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)

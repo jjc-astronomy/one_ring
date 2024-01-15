@@ -5,3 +5,4 @@ OLD_RESULTS/
 *.html
 .nextflow*
 secrets.config
+.env
