@@ -6,3 +6,4 @@ OLD_RESULTS/
 .nextflow*
 secrets.config
 .env
+__pycache__
