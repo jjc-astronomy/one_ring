@@ -431,7 +431,7 @@ def get_beam_id(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id)
     
 
 
-def insert_beam(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id, tsamp_seconds, is_coherent=True, return_id=False):
+def insert_beam(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id, tsamp_seconds, is_coherent=1, return_id=False):
     '''
     Insert a new beam into the beams table if it doesn't already exist
     '''
@@ -439,7 +439,7 @@ def insert_beam(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id,
     beam_table = get_table("beam")
 
     with engine.connect() as conn:
-        stmt = select(beam_table.c.id).where(beam_table.c.name == beam_name).where(beam_table.c.pointing_id == pointing_id).where(beam_table.c.beam_type_id == beam_type_id).limit(1)
+        stmt = select(beam_table.c.id).where(beam_table.c.name == beam_name).where(beam_table.c.pointing_id == pointing_id).where(beam_table.c.beam_type_id == beam_type_id).where(beam_table.c.is_coherent == is_coherent).limit(1)
         result = conn.execute(stmt).first()
         
         if result is None:
@@ -515,7 +515,36 @@ def insert_file_type(file_type_name, description=None, return_id=False):
             if return_id:
                 return result[0]
 
-def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degrees=None, elevation_meters=None, description=None, return_id=False):
+def insert_antenna(name, telescope_id, description=None, latitude_degrees=None, longitude_degrees=None, elevation_meters=None, return_id=False):
+    '''
+    Insert a new antenna into the antenna table if it doesn't already exist for the same telescope
+    '''
+    antenna_table = get_table("antenna")
+    with engine.connect() as conn:
+        stmt = (
+                select(antenna_table)
+                .where(antenna_table.c.name == name)
+                .where(antenna_table.c.telescope_id == telescope_id)
+                .limit(1)
+            )
+        result = conn.execute(stmt).first()
+        if result is None:
+            stmt = insert(antenna_table).values(name=name, description=description, telescope_id=telescope_id, latitude_degrees=latitude_degrees, longitude_degrees=longitude_degrees, elevation_meters=elevation_meters)
+            db_update = conn.execute(stmt)
+            conn.commit()
+            print(f"Added {name} to antenna table")
+            if return_id:
+                antenna_id = db_update.lastrowid
+                return antenna_id
+        else:
+            print(f"{name} already exists in antenna table for telescope {telescope_name}. Skipping...")
+            if return_id:
+                return result[0]
+
+
+
+
+def insert_antenna_with_names(name, telescope_name, description=None, latitude_degrees=None, longitude_degrees=None, elevation_meters=None, return_id=False):
     '''
     Insert a new antenna into the antenna table if it doesn't already exist for the same telescope
     '''
@@ -525,7 +554,7 @@ def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degree
     with engine.connect() as conn:
             
             stmt = (
-                select(antenna_table.c.id)
+                select(antenna_table)
                 .join(telescope_table, telescope_table.c.id == antenna_table.c.telescope_id)
                 .where(antenna_table.c.name == name)
                 .where(telescope_table.c.name == telescope_name)
@@ -547,7 +576,7 @@ def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degree
                 if return_id:
                     return result[0]
 
-def insert_hardware(hardware_name, job_scheduler, hardware_description=None, return_id=False):
+def insert_hardware(hardware_name, job_scheduler=None, hardware_description=None, return_id=False):
     '''
     Insert a new hardware into the hardware table if it doesn't already exist
     '''
@@ -1123,29 +1152,33 @@ def insert_user_labels(fold_candidate_id, user_id, rfi=None, noise=None, t1_cand
         if return_id:
             return db_update.lastrowid
 
-def insert_beam_antenna(antenna_id, beam_id, description=None, return_id=False):
+def insert_beam_antenna(antenna_name, beam_id, description=None, return_id=False):
     '''
     Insert a new beam_antenna into the beam_antenna table if it doesn't already exist
     '''
     beam_antenna_table = get_table("beam_antenna")
+    antenna_table = get_table("antenna")
+
     with engine.connect() as conn:
         # Check if a beam_antenna with the same antenna_id and beam_id exists
         stmt = (
             select(beam_antenna_table)
-            .where(beam_antenna_table.c.antenna_id == antenna_id)
+            .join(antenna_table, antenna_table.c.id == beam_antenna_table.c.antenna_id)
+            .where(antenna_table.c.name == antenna_name)
             .where(beam_antenna_table.c.beam_id == beam_id)
             .limit(1)
         )
         result = conn.execute(stmt).first()
         if result is None:
+            antenna_id = get_id_from_name("antenna", antenna_name)
             stmt = insert(beam_antenna_table).values(antenna_id=antenna_id, beam_id=beam_id, description=description)
             db_update = conn.execute(stmt)
             conn.commit()
-            print(f"Added beam_antenna to beam_antenna table")
+            print(f"Added beam_id {beam_id} with antenna_name {antenna_name} to beam_antenna table")
             if return_id:
                 return db_update.lastrowid
         else:
-            print(f"Beam_antenna already exists in beam_antenna table. Skipping...")
+            print(f"Beam_id {beam_id} with antenna_name {antenna_name} already exists in beam_antenna table. Skipping...")
             if return_id:
                 return result[0]
 
@@ -1159,11 +1192,13 @@ def setup_argparse():
     parser.add_argument('--telescope_name', type=str, help='Telescope Name', required=True)
     #parser.add_argument('--freq_band', type=str, help='Frequency Band', required=True)
     parser.add_argument('--target_name', type=str, help='Target Name', required=True)
-    #parser.add_argument('--beam_name', type=str, help='Beam Name', required=True)
-    #parser.add_argument('--beam_type_name', type=str, help='Beam Type', required=True)
+    parser.add_argument('--beam_name', type=str, help='Beam Name', required=True)
+    parser.add_argument('--beam_type_name', type=str, help='Beam Type', required=True)
+    parser.add_argument('--is_coherent', type=int, choices=[0, 1], default=1, help='Beam Type. Accepts 0 or 1. Defaults to 1.')
     #parser.add_argument('--file_type_name', type=str, help='File Type', required=True)
     parser.add_argument('--raw_data', type=str, help='Raw Data Directory', required=True)
     parser.add_argument('--obs_header', type=str, help='Observation header file', required=True)
+    parser.add_argument('--hardware_name', type=str, help='Hardware name', required=True)
 
     return parser
 
@@ -1270,6 +1305,9 @@ def main():
     target_name = args.target_name
     data_header = args.obs_header
     raw_data = args.raw_data
+    beam_type = args.beam_type_name
+    is_coherent_flag = args.is_coherent
+    hardware_name = args.hardware_name
 
     project_id = insert_project_name(project_name, return_id=True)
     telescope_id = insert_telescope_name(telescope_name, return_id=True)
@@ -1277,7 +1315,9 @@ def main():
     ra = obs_header['TIED_BEAM_RA']
     dec = obs_header['TIED_BEAM_DEC']
     utc_start_str = obs_header['UTC_START']
+    antenna_list = obs_header['ANTENNAE']
     utc_start = parse_and_format_datetime(utc_start_str)
+    beam_name = args.beam_name
     
     nchans = obs_header['SEARCH_OUTNCHAN']
     tsamp = float(obs_header['SEARCH_OUTTSAMP']) * 1e-6
@@ -1292,39 +1332,30 @@ def main():
     print(obs_header)
     target_id = insert_target_name(target_name, ra, dec, project_id, return_id=True)
     pointing_id = insert_pointing(utc_start, tobs, nchans, freq_band, target_id, lowest_freq, highest_freq, tsamp, telescope_id, receiver, return_id=True)
-    print(freq_band, central_freq, tobs, lowest_freq, highest_freq, target_id, pointing_id)
+    beam_type_id = insert_beam_type(beam_type, return_id=True)
+    beam_id = insert_beam(beam_name, ra, dec, pointing_id, beam_type_id, tsamp, is_coherent=is_coherent_flag, return_id=True)
+    hardware_id = insert_hardware(hardware_name, return_id=True)
+    #get extension of first file
+    file_type_extension = os.path.splitext(data[0])[1][1:]
+    file_type_id = insert_file_type(file_type_extension, return_id=True)
+    print(file_type_extension, file_type_id)
 
+    print(antenna_list)
+    #iterate through antenna list and add to beam_antenna table
+    # for antenna in antenna_list:
+    #     insert_beam_antenna(antenna, beam_id)
     
     
-    # insert_project_name("COMPACT", "ERC funded baseband pulsar search survey with MeerKAT and Effelsberg")
-    # insert_project_name("TRAPUM_GC_SEARCHES", "GC Searches for the Transients and Pulsars with MeerKAT survey")
-    # insert_project_name("HTRU_S_LOWLAT", "HTRU South Low latitude survey with Parkes")
-    # print_table("project")
+    
+   
 
-    # insert_file_type("fil", "Filterbank file")
-    # insert_file_type("sf", "PSRFITS file")
-    # insert_file_type("csv", "CSV file")
-    # insert_file_type("png", "PNG file")
-    # insert_file_type("pdf", "PDF file")
-    # insert_file_type("txt", "Text file")
-    # insert_file_type("json", "JSON file")
-    # insert_file_type("xml", "XML file")
-    # insert_file_type("yaml", "YAML file")
-    # insert_file_type("dat", "PRESTO time series file")
-    # insert_file_type("tim", "Sigproc time series file")
-    # insert_file_type("ar", "Folded archive file")
-    # insert_file_type("pfd", "PRESTO folded archive file")
-    # insert_file_type("gz", "GZIP compressed file")
-    # print_table("file_type")
+    
+   
 
     
    
    
-    # insert_telescope_name("MeerKAT", "Radio Inteferometer in South Africa")
-    # insert_telescope_name("Effelsberg", "Single-Dish Radio telescope in Germany")
-    # insert_telescope_name("Parkes", "Single-Dish Radio telescope in Australia")
-    # insert_telescope_name("GBT", "Robert C. Byrd Green Bank Telescope in West Virginia")
-    # print_table("telescope")
+    
 
     # for i in range(64):
     #     insert_antenna(f"MK{i:03d}", "MeerKAT", description= f"MeerKAT Antenna {i}")
@@ -1333,41 +1364,23 @@ def main():
     # insert_antenna("PK000", "Parkes", description= "Parkes Antenna")
     # insert_antenna("GB000", "GBT", description= "GBT Antenna")
     # print_table("antenna")
-    #delete_all_rows("target")
-    #reset_primary_key_counter("target")
-    #insert_target_name_with_project_name("J2140-2310B", "21:40:22.41", "-23:10:48.8", "TRAPUM_GC_SEARCHES", description= "M30B")
-    #insert_target_name_with_project_name("J2140-2310A", "21:40:22.41", "-23:10:46.8", "COMPACT", description= "M30A")
-    # print_table("target")
-    # #test = insert_pointing("2021-01-30-11:54:02.03986", 3573.05229549, 4096, "LBAND", "J2140-2310A", decimal.Decimal(900.0), decimal.Decimal(1500.0), decimal.Decimal(0.000256), "MeerKAT", "L-band", return_id=True)
-    # #print(test)
-    # print_table("pointing")
-    # insert_pointing("2021-01-30-11:54:02.03986", 3573.05229549, 4096, "LBAND", "J2140-2310A", decimal.Decimal(900.0), decimal.Decimal(1500.0), decimal.Decimal(0.000256), "MeerKAT", "L-band")
-    # print_table("pointing") 
+    
+    
 
 
 
-    # insert_beam_type("Stokes_I", "Total Intensity Beam")
-    # insert_beam_type("Baseband", "Baseband voltage beam")
-    # insert_beam_type("test", "test voltage beam")
-    # print_table("beam_type")
+    
     
     # # #insert_beam("cfbf00000", "21:40:22.4100", "-23:10:48.8000", 1, 1, 0.000256, True)
-    # test1 = insert_beam_without_pointing_id("cfbf00002", "21:40:12.4100", "-23:10:48.8000", "Stokes_I", "2021-01-30-11:54:02.05986", "COMPACT", "MeerKAT", "J2140-2310A", "LBAND", 0.000256, is_coherent=True, return_id=True)
-    # print(test1)
-    # print_table("beam")
-    # #insert_beam_without_pointing_id("cfbf00002", "21:40:12.4100", "-23:10:48.8000", "Stokes_I", "2021-01-30-11:54:02.05986", "COMPACT", "MeerKAT", "J2140-2310A", "LBAND", 0.000256, is_coherent=True)
-    # #test1 = insert_beam_without_pointing_id("cfbf00002", "21:40:12.4100", "-23:10:48.8000", "Stokes_I", "2021-01-30-11:54:02.05986", "COMPACT", "MeerKAT", "J2140-2310A", "LBAND", 0.000256, is_coherent=True, return_id=True)
-    # #print_table("beam")
-    # #print(test1)
-
+    
     #insert_beam_antenna(1, 1, description="Incoherent beam 1")
     #print_table("beam_antenna")
 
-    # insert_hardware("Contra", "ht-condor", "Contra HPC in Dresden")
-    # insert_hardware("Hercules", "slurm", "Hercules HPC in Garching")
-    # insert_hardware("OzSTAR", "slurm", "OzSTAR HPC in Melbourne")
-    # insert_hardware("Ngarrgu", "slurm", "Ngarrgu Tindebeek HPC in Melbourne")
-    # insert_hardware("AWS", "aws", "Amazon Web Services")
+    # insert_hardware("Contra", job_scheduler="ht-condor", hardware_description="Contra HPC in Dresden")
+    # insert_hardware("Hercules", job_scheduler="slurm", hardware_description="Hercules HPC in Garching")
+    # insert_hardware("OzSTAR", job_scheduler="slurm", hardware_description="OzSTAR HPC in Melbourne")
+    # insert_hardware("Ngarrgu", job_scheduler="slurm",hardware_description= "Ngarrgu Tindebeek HPC in Melbourne")
+    # insert_hardware("AWS", job_scheduler="aws", hardware_description="Amazon Web Services")
     # print_table("hardware")
     
     # insert_pipeline("Peasoup", "peasoup", "123456", "main", "Peasoup Time-Domain Acceleration Search Pipeline")
