@@ -438,7 +438,7 @@ def insert_file_type(file_type_name, description=None):
         else:
             print(f"{file_type_name} already exists in file_type table. Skipping...")
 
-def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degrees=None, elevation_meters=None, description=None):
+def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degrees=None, elevation_meters=None, north=None, east=None, up=None, description=None):
     '''
     Insert a new antenna into the antenna table if it doesn't already exist for the same telescope
     '''
@@ -458,7 +458,7 @@ def insert_antenna(name, telescope_name, latitude_degrees=None, longitude_degree
             
             if result is None:
                 telescope_id = get_id_from_name("telescope", telescope_name)
-                stmt = insert(antenna_table).values(name=name, description=description, telescope_id=telescope_id, latitude_degrees=latitude_degrees, longitude_degrees=longitude_degrees, elevation_meters=elevation_meters)
+                stmt = insert(antenna_table).values(name=name, description=description, telescope_id=telescope_id, latitude_degrees=latitude_degrees, longitude_degrees=longitude_degrees, elevation_meters=elevation_meters, north=north, east=east, up=up)
                 conn.execute(stmt)
                 conn.commit()
                 print(f"Added {name} to antenna table")
@@ -1030,48 +1030,126 @@ def insert_beam_antenna(antenna_id, beam_id, description=None):
 
 
 def main():
-    
+
+    delete_all_rows('data_product')
+    reset_primary_key_counter('data_product')
+    # delete_all_rows('file_type')
+    # reset_primary_key_counter('file_type')
+  
     
 
- 
+    insert_hardware("Contra", "ht-condor", "Contra HPC in Dresden")
+    insert_hardware("Hercules", "slurm", "Hercules HPC in Garching")
+    insert_hardware("OzSTAR", "slurm", "OzSTAR HPC in Melbourne")
+    insert_hardware("Ngarrgu", "slurm", "Ngarrgu Tindebeek HPC in Melbourne")
+    insert_hardware("AWS", "aws", "Amazon Web Services")
+    print_table("hardware")
     
-    # insert_project_name("COMPACT", "ERC funded baseband pulsar search survey with MeerKAT and Effelsberg")
-    # insert_project_name("TRAPUM_GC_SEARCHES", "GC Searches for the Transients and Pulsars with MeerKAT survey")
-    # insert_project_name("HTRU_S_LOWLAT", "HTRU South Low latitude survey with Parkes")
-    # print_table("project")
+        
+    insert_project_name("COMPACT", "ERC funded baseband pulsar search survey with MeerKAT and Effelsberg")
+    insert_project_name("TRAPUM_GC_SEARCHES", "GC Searches for the Transients and Pulsars with MeerKAT survey")
+    insert_project_name("HTRU_S_LOWLAT", "HTRU South Low latitude survey with Parkes")
+    print_table("project")
 
-    # insert_file_type("filterbank", "Filterbank file")
-    # insert_file_type("psrfits", "PSRFITS file")
-    # insert_file_type("csv", "CSV file")
-    # insert_file_type("png", "PNG file")
-    # insert_file_type("pdf", "PDF file")
-    # insert_file_type("txt", "Text file")
-    # insert_file_type("json", "JSON file")
-    # insert_file_type("xml", "XML file")
-    # insert_file_type("yaml", "YAML file")
-    # insert_file_type("dat", "PRESTO time series file")
-    # insert_file_type("tim", "Sigproc time series file")
-    # insert_file_type("ar", "Folded archive file")
-    # insert_file_type("pfd", "PRESTO folded archive file")
-    # insert_file_type("gz", "GZIP compressed file")
-    # print_table("file_type")
+    insert_file_type("fil", "Filterbank file")
+    insert_file_type("sf", "PSRFITS file")
+    insert_file_type("fits", "FITS file")
+    insert_file_type("csv", "CSV file")
+    insert_file_type("png", "PNG file")
+    insert_file_type("pdf", "PDF file")
+    insert_file_type("txt", "Text file")
+    insert_file_type("json", "JSON file")
+    insert_file_type("xml", "XML file")
+    insert_file_type("yaml", "YAML file")
+    insert_file_type("dat", "PRESTO time series file")
+    insert_file_type("tim", "Sigproc time series file")
+    insert_file_type("ar", "Folded archive file")
+    insert_file_type("pfd", "PRESTO folded archive file")
+    insert_file_type("gz", "GZIP compressed file")
+    print_table("file_type")
 
     
    
    
-    # insert_telescope_name("MeerKAT", "Radio Inteferometer in South Africa")
-    # insert_telescope_name("Effelsberg", "Single-Dish Radio telescope in Germany")
-    # insert_telescope_name("Parkes", "Single-Dish Radio telescope in Australia")
-    # insert_telescope_name("GBT", "Robert C. Byrd Green Bank Telescope in West Virginia")
-    # print_table("telescope")
+    insert_telescope_name("MeerKAT", "Radio Inteferometer in South Africa")
+    insert_telescope_name("Effelsberg", "Single-Dish Radio telescope in Germany")
+    insert_telescope_name("Parkes", "Single-Dish Radio telescope in Australia")
+    insert_telescope_name("GBT", "Robert C. Byrd Green Bank Telescope in West Virginia")
+    print_table("telescope")
+
+    insert_antenna("m000", "MeerKAT", north=-207.290, east=-8.264, up=8.597, description="MeerKAT antenna 0")
+    insert_antenna("m001", "MeerKAT", north=-171.762, east=1.121, up=8.471, description="MeerKAT antenna 1")
+    insert_antenna("m002", "MeerKAT", north=-224.236, east=-32.113, up=8.645, description="MeerKAT antenna 2")
+    insert_antenna("m003", "MeerKAT", north=-202.276, east=-66.518, up=8.285, description="MeerKAT antenna 3")
+    insert_antenna("m004", "MeerKAT", north=-252.946, east=-123.624, up=8.513, description="MeerKAT antenna 4")
+    insert_antenna("m005", "MeerKAT", north=-283.120, east=-102.088, up=8.875, description="MeerKAT antenna 5")
+    insert_antenna("m006", "MeerKAT", north=-295.428, east=-18.232, up=9.188, description="MeerKAT antenna 6")
+    insert_antenna("m007", "MeerKAT", north=-402.732, east=-89.592, up=9.769, description="MeerKAT antenna 7")
+    insert_antenna("m008", "MeerKAT", north=-535.026, east=-93.527, up=10.445, description="MeerKAT antenna 8")
+    insert_antenna("m009", "MeerKAT", north=-371.056, east=32.357, up=10.140, description="MeerKAT antenna 9")
+    insert_antenna("m010", "MeerKAT", north=-511.872, east=88.095, up=11.186, description="MeerKAT antenna 10")
+    insert_antenna("m011", "MeerKAT", north=-352.078, east=84.012, up=10.151, description="MeerKAT antenna 11")
+    insert_antenna("m012", "MeerKAT", north=-368.267, east=140.019, up=10.449, description="MeerKAT antenna 12")
+    insert_antenna("m013", "MeerKAT", north=-393.460, east=236.792, up=11.124, description="MeerKAT antenna 13")
+    insert_antenna("m014", "MeerKAT", north=-285.792, east=280.669, up=10.547, description="MeerKAT antenna 14")
+    insert_antenna("m015", "MeerKAT", north=-219.142, east=210.644, up=9.738, description="MeerKAT antenna 15")
+    insert_antenna("m016", "MeerKAT", north=-185.873, east=288.159, up=9.795, description="MeerKAT antenna 16")
+    insert_antenna("m017", "MeerKAT", north=-112.263, east=199.624, up=8.955, description="MeerKAT antenna 17")
+    insert_antenna("m018", "MeerKAT", north=-245.870, east=105.727, up=9.529, description="MeerKAT antenna 18")
+    insert_antenna("m019", "MeerKAT", north=-285.223, east=170.787, up=10.071, description="MeerKAT antenna 19")
+    insert_antenna("m020", "MeerKAT", north=-299.638, east=97.016, up=9.877, description="MeerKAT antenna 20")
+    insert_antenna("m021", "MeerKAT", north=-327.241, east=-295.966, up=8.117, description="MeerKAT antenna 21")
+    insert_antenna("m022", "MeerKAT", north=0.544, east=-373.002, up=5.649, description="MeerKAT antenna 22")
+    insert_antenna("m023", "MeerKAT", north=-142.185, east=-322.306, up=6.825, description="MeerKAT antenna 23")
+    insert_antenna("m024", "MeerKAT", north=150.088, east=-351.046, up=4.845, description="MeerKAT antenna 24")
+    insert_antenna("m025", "MeerKAT", north=225.617, east=-181.978, up=5.068, description="MeerKAT antenna 25")
+    insert_antenna("m026", "MeerKAT", north=17.045, east=-99.004, up=6.811, description="MeerKAT antenna 26")
+    insert_antenna("m027", "MeerKAT", north=-23.112, east=40.475, up=7.694, description="MeerKAT antenna 27")
+    insert_antenna("m028", "MeerKAT", north=-87.170, east=-51.179, up=7.636, description="MeerKAT antenna 28")
+    insert_antenna("m029", "MeerKAT", north=-124.111, east=-88.762, up=7.700, description="MeerKAT antenna 29")
+    insert_antenna("m030", "MeerKAT", north=113.949, east=171.281, up=7.278, description="MeerKAT antenna 30")
+    insert_antenna("m031", "MeerKAT", north=93.756, east=246.567, up=7.469, description="MeerKAT antenna 31")
+    insert_antenna("m032", "MeerKAT", north=175.505, east=461.275, up=7.367, description="MeerKAT antenna 32")
+    insert_antenna("m033", "MeerKAT", north=863.959, east=580.678, up=3.600, description="MeerKAT antenna 33")
+    insert_antenna("m034", "MeerKAT", north=-28.308, east=357.811, up=8.972, description="MeerKAT antenna 34")
+    insert_antenna("m035", "MeerKAT", north=-180.894, east=386.152, up=10.290, description="MeerKAT antenna 35")
+    insert_antenna("m036", "MeerKAT", north=-290.759, east=388.257, up=10.812, description="MeerKAT antenna 36")
+    insert_antenna("m037", "MeerKAT", north=-459.309, east=380.286, up=12.172, description="MeerKAT antenna 37")
+    insert_antenna("m038", "MeerKAT", north=-569.080, east=213.308, up=11.946, description="MeerKAT antenna 38")
+    insert_antenna("m039", "MeerKAT", north=-592.147, east=253.748, up=12.441, description="MeerKAT antenna 39")
+    insert_antenna("m040", "MeerKAT", north=-712.219, east=-26.858, up=11.833, description="MeerKAT antenna 40")
+    insert_antenna("m041", "MeerKAT", north=-661.678, east=-287.545, up=9.949, description="MeerKAT antenna 41")
+    insert_antenna("m042", "MeerKAT", north=-460.318, east=-361.714, up=8.497, description="MeerKAT antenna 42")
+    insert_antenna("m043", "MeerKAT", north=-128.326, east=-629.853, up=5.264, description="MeerKAT antenna 43")
+    insert_antenna("m044", "MeerKAT", north=600.497, east=-896.164, up=-0.640, description="MeerKAT antenna 44")
+    insert_antenna("m045", "MeerKAT", north=266.750, east=-1832.860, up=0.108, description="MeerKAT antenna 45")
+    insert_antenna("m046", "MeerKAT", north=1751.923, east=-1467.341, up=-7.078, description="MeerKAT antenna 46")
+    insert_antenna("m047", "MeerKAT", north=-517.297, east=-578.296, up=7.615, description="MeerKAT antenna 47")
+    insert_antenna("m048", "MeerKAT", north=2686.863, east=-2805.653, up=-9.755, description="MeerKAT antenna 48")
+    insert_antenna("m049", "MeerKAT", north=436.462, east=-3605.957, up=2.696, description="MeerKAT antenna 49")
+    insert_antenna("m050", "MeerKAT", north=-843.715, east=-2052.336, up=5.338, description="MeerKAT antenna 50")
+    insert_antenna("m051", "MeerKAT", north=-769.359, east=-850.255, up=7.614, description="MeerKAT antenna 51")
+    insert_antenna("m052", "MeerKAT", north=-1148.652, east=-593.192, up=10.550, description="MeerKAT antenna 52")
+    insert_antenna("m053", "MeerKAT", north=-1304.462, east=9.365, up=15.032, description="MeerKAT antenna 53")
+    insert_antenna("m054", "MeerKAT", north=-499.812, east=871.980, up=13.364, description="MeerKAT antenna 54")
+    insert_antenna("m055", "MeerKAT", north=96.492, east=1201.780, up=10.023, description="MeerKAT antenna 55")
+    insert_antenna("m056", "MeerKAT", north=466.668, east=1598.403, up=6.990, description="MeerKAT antenna 56")
+    insert_antenna("m057", "MeerKAT", north=3259.915, east=294.645, up=-10.637, description="MeerKAT antenna 57")
+    insert_antenna("m058", "MeerKAT", north=2686.873, east=2805.764, up=-3.660, description="MeerKAT antenna 58")
+    insert_antenna("m059", "MeerKAT", north=758.895, east=3686.427, up=11.822, description="MeerKAT antenna 59")
+    insert_antenna("m060", "MeerKAT", north=-1840.478, east=3419.683, up=23.697, description="MeerKAT antenna 60")
+    insert_antenna("m061", "MeerKAT", north=-2323.779, east=-16.409, up=21.304, description="MeerKAT antenna 61")
+    insert_antenna("m062", "MeerKAT", north=-2503.773, east=-1440.632, up=21.683, description="MeerKAT antenna 62")
+    insert_antenna("m063", "MeerKAT", north=-1840.480, east=-3419.585, up=16.383, description="MeerKAT antenna 63")
+
 
     # for i in range(64):
     #     insert_antenna(f"MK{i:03d}", "MeerKAT", description= f"MeerKAT Antenna {i}")
 
-    # insert_antenna("EF000", "Effelsberg", description= "Effelsberg Antenna")
-    # insert_antenna("PK000", "Parkes", description= "Parkes Antenna")
-    # insert_antenna("GB000", "GBT", description= "GBT Antenna")
-    # print_table("antenna")
+    insert_antenna("EF000", "Effelsberg", description= "Effelsberg Antenna")
+    insert_antenna("PK000", "Parkes", description= "Parkes Antenna")
+    insert_antenna("GB000", "GBT", description= "GBT Antenna")
+    print_table("antenna")
    
     # insert_target_name("J2140-2310B", "21:40:22.4100", "-23:10:48.8000", "TRAPUM_GC_SEARCHES", description= "APSUSE Observation with beam on M30B")
     # insert_target_name("J2140-2310A", "21:40:22.4100", "-23:10:48.8000", "COMPACT", 0.06, 0.2, 0.3, 0.4, 0.5, 0.2, "COMPACT Observation with beam on M30A")
@@ -1085,10 +1163,9 @@ def main():
 
 
 
-    # insert_beam_type("Stokes_I", "Total Intensity Beam")
-    # insert_beam_type("Baseband", "Baseband voltage beam")
-    # insert_beam_type("test", "test voltage beam")
-    # print_table("beam_type")
+    insert_beam_type("Stokes_I", "Total Intensity Beam")
+    insert_beam_type("Baseband", "Baseband voltage beam")
+    print_table("beam_type")
     
     # # #insert_beam("cfbf00000", "21:40:22.4100", "-23:10:48.8000", 1, 1, 0.000256, True)
     # test1 = insert_beam_without_pointing_id("cfbf00002", "21:40:12.4100", "-23:10:48.8000", "Stokes_I", "2021-01-30-11:54:02.05986", "COMPACT", "MeerKAT", "J2140-2310A", "LBAND", 0.000256, is_coherent=True, return_id=True)
@@ -1102,12 +1179,6 @@ def main():
     #insert_beam_antenna(1, 1, description="Incoherent beam 1")
     #print_table("beam_antenna")
 
-    # insert_hardware("Contra", "ht-condor", "Contra HPC in Dresden")
-    # insert_hardware("Hercules", "slurm", "Hercules HPC in Garching")
-    # insert_hardware("OzSTAR", "slurm", "OzSTAR HPC in Melbourne")
-    # insert_hardware("Ngarrgu", "slurm", "Ngarrgu Tindebeek HPC in Melbourne")
-    # insert_hardware("AWS", "aws", "Amazon Web Services")
-    # print_table("hardware")
     
     # insert_pipeline("Peasoup", "peasoup", "123456", "main", "Peasoup Time-Domain Acceleration Search Pipeline")
     # insert_pipeline("Presto", "presto", "123456", "main", "PRESTO Frequency-Domain Acceleration Search Pipeline")
@@ -1156,9 +1227,9 @@ def main():
 
     # insert_fold_candidate(1, 1, 1, 0.05111, 200.0, 1e-9, 0.0, 50.0, "Ter5_cfbf00000.ar", "/datax/scratch/compact/cbf/cbf00000", 2, 1)
     # print_table("fold_candidate")
-    #insert_user("vishnu", "Vishnu Balakrishnan", "vishnu@mpifr-bonn.mpg.de", "123456", administrator=1)
-    #insert_user("vivek", "Vivek Krishnan", "vkrishnan@mpifr-bonn.mpg.de", "654321", administrator=1)
-    # print_table("user")
+    insert_user("vishnu", "Vishnu Balakrishnan", "vishnu@mpifr-bonn.mpg.de", "123456", administrator=1)
+    insert_user("vivek", "Vivek Krishnan", "vkrishnan@mpifr-bonn.mpg.de", "654321", administrator=1)
+    print_table("user")
     
     # insert_user_labels(1, 1, rfi=1)
     # insert_user_labels(1, 2, noise=1)

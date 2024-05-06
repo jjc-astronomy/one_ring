@@ -1,0 +1,124 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "SearchCandidate",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "pointing_id",
+      "type": "int"
+    },
+    {
+      "name": "beam_id",
+      "type": "int"
+    },
+    {
+      "name": "processing_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "spin_period",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dm",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdot",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdotdot",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pb",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "x",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "t0",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "omega",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "e",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "snr",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ddm_count_ratio",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ddm_snr_ratio",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "nassoc",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "filename",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filepath",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "nh",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "candidate_filter_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "metadata_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dp_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "candidate_id_in_file",
+      "type": ["null", "int"],
+      "default": null
+    }
+  ]
+}

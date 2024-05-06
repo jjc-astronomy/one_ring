@@ -1,0 +1,51 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Prepfold",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "ncpus",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "rfifind_mask",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

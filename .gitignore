@@ -1,9 +1,14 @@
 work/
 RESULTS/
+results/
 OLD_RESULTS/
+trace*
 *.fil
 *.html
 .nextflow*
 secrets.config
+Thoughts.txt
 .env
 __pycache__
+kafka_env/
+

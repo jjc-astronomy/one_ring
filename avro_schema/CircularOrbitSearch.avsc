@@ -1,0 +1,27 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "CircularOrbitSearch",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "min_porb_h",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_porb_h",
+      "type": ["null", "string"],
+      "default": null
+    },
+    // Add the rest of the fields following the pattern above.
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

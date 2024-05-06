@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-import sys, glob
+import sys, glob, re
 import argparse
 import os
 from dotenv import load_dotenv
@@ -8,10 +8,14 @@ from sqlalchemy.engine import URL
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy import MetaData, Table, insert, select, text, func
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import decimal
 import your
+import subprocess
+import uuid
+import json
+#from natsort import natsorted
 # Load environment variables from .env file
 load_dotenv()
 
@@ -38,64 +42,7 @@ metadata_obj.reflect(bind=engine)
 def get_table(table_name):
     return metadata_obj.tables[table_name]
 
-#telescope_table = Table("telescope", metadata_obj, autoload_with=engine)
-# telescope_table = get_table("telescope")
-# project_table = get_table("project") 
-# target_table = get_table("target")   
-# pointing_table = get_table("pointing")
-# beam_table = get_table("beam")
-# beam_types_table = get_table("beam_types")
-# antenna_table = get_table("antenna")
-# hardware_table = get_table("hardware")
-# peasoup_table = get_table("peasoup")
-# pulsarx_table = get_table("pulsarx")
-# filtool_table = get_table("filtool")
-# prepfold_table = get_table("prepfold")
-# processing_table = get_table("processing")
-#observation_metadata = get_table("observation_metadata")
 
-# stmt = select(target_table)
-# stmt1 = select(telescope_table)
-# stmt2 = select(project_table)
-# stmt3 = select(pointing_table)
-# stmt4 = select(antenna_table)
-# stmt5 = select(processing_table)
-#stmt1 = select(target_table)
-
-#Delete all rows from the table
-#stmt = telescope_table.delete()
-
-# with engine.connect() as conn:
-#     result = conn.execute(stmt5)
-#     conn.commit()
-#     for row in result:
-#         print(row)
-
-# with engine.connect() as conn:
-#     result = conn.execute(stmt1)
-#     for row in result:
-#         print(row)
-
-# with engine.connect() as conn:
-#     result = conn.execute(stmt2)
-#     for row in result:
-#         print(row)
-
-# with engine.connect() as conn:
-#     result = conn.execute(stmt3)
-#     for row in result:
-#         print(row)
-
-# with engine.connect() as conn:
-#     result = conn.execute(stmt1)
-#     for row in result:
-#         print(row)
-
-
-# #Orm method
-# session = Session(engine)
-# row = session.execute(select(telescope_table)).first()
-# print(row)
 
 def print_table(table_name):
     '''
@@ -257,7 +204,7 @@ def insert_pointing(utc_start_str, tobs, nchans, freq_band, target_id, freq_star
         result = conn.execute(stmt).first()
         
         if result is None:
-            stmt = insert(pointing_table).values(utc_start=utc_start, tobs_seconds=tobs, nchan_raw=nchans, freq_band=freq_band, target_id=target_id, freq_start_mhz=freq_start_mhz, freq_end_mhz=freq_end_mhz, tsamp_raw_seconds=tsamp_seconds, telescope_id=telescope_id, receiver=receiver_name)
+            stmt = insert(pointing_table).values(utc_start=utc_start, tobs=tobs, nchans_raw=nchans, freq_band=freq_band, target_id=target_id, freq_start_mhz=freq_start_mhz, freq_end_mhz=freq_end_mhz, tsamp_raw=tsamp_seconds, telescope_id=telescope_id, receiver=receiver_name)
             db_update = conn.execute(stmt)
             conn.commit()
             print(f"Added pointing for {target_id} observed at {utc_start} with telescope {telescope_id} to pointing table")
@@ -312,9 +259,9 @@ def insert_pointing_with_names(utc_start_str, tobs, nchans, freq_band, target_na
                 sys.exit()
 
             stmt = insert(pointing_table).values(
-                utc_start=utc_start, tobs_seconds=tobs, nchan_raw=nchans, freq_band=freq_band,
+                utc_start=utc_start, tobs=tobs, nchan_raw=nchans, freq_band=freq_band,
                 target_id=target_id, freq_start_mhz=freq_start_mhz, freq_end_mhz=freq_end_mhz,
-                tsamp_raw_seconds=tsamp_seconds, telescope_id=telescope_id, receiver=receiver_name
+                tsamp_raw=tsamp_seconds, telescope_id=telescope_id, receiver=receiver_name
             )
             db_update = conn.execute(stmt)
             conn.commit()
@@ -443,7 +390,7 @@ def insert_beam(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id,
         result = conn.execute(stmt).first()
         
         if result is None:
-            stmt = insert(beam_table).values(name=beam_name, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id, tsamp_seconds=tsamp_seconds, is_coherent=is_coherent)
+            stmt = insert(beam_table).values(name=beam_name, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id, tsamp=tsamp_seconds, is_coherent=is_coherent)
             db_update = conn.execute(stmt)
             conn.commit()
             print(f"Added {beam_name} to beam table")
@@ -478,7 +425,7 @@ def insert_beam_without_pointing_id(beam_name, beam_ra_str, beam_dec_str, beam_t
         result = conn.execute(stmt).first()
        
         if result is None:
-            stmt = insert(beam_table).values(name=beam_name, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id, tsamp_seconds=tsamp_seconds, is_coherent=is_coherent)
+            stmt = insert(beam_table).values(name=beam_name, ra_str=beam_ra_str, dec_str=beam_dec_str, pointing_id=pointing_id, beam_type_id=beam_type_id, tsamp=tsamp_seconds, is_coherent=is_coherent)
             db_update = conn.execute(stmt)
             conn.commit()
             print(f"Added {beam_name} to beam table")
@@ -660,15 +607,13 @@ def insert_pipeline_execution_order(pipeline_id, program_name, execution_order, 
         else:
             print(f"{program_name} already exists in pipeline_execution_order table. Skipping...")
 
-def insert_peasoup(acc_start, acc_end, min_snr, ram_limit_gb, nharmonics, ngpus, total_cands_limit, fft_size, dm_file, accel_tol, birdie_list, chan_mask, extra_args, container_image_name, container_image_version, container_type, container_image_id, pipeline_github_commit_hash, execution_order, argument_hash=None, return_id=False):
+def insert_peasoup(acc_start, acc_end, min_snr, ram_limit_gb, nharmonics, ngpus, total_cands_limit, fft_size, dm_file, container_image_name, container_image_version, container_type, container_image_id, accel_tol=1.11, birdie_list=None, chan_mask=None, extra_args=None, argument_hash=None, return_id=False):
     ''' Insert Peasoup parameters into the peasoup_params table if it doesn't already exist ''' 
     peasoup_table = get_table("peasoup")
     combined_args = f"{acc_start}{acc_end}{min_snr}{ram_limit_gb}{nharmonics}{ngpus}{total_cands_limit}{fft_size}{dm_file}{accel_tol}{birdie_list}{chan_mask}{extra_args}"
     # Generate SHA256 hash
     argument_hash = hashlib.sha256(combined_args.encode()).hexdigest()
-    #Get pipeline id to add in execution order table
-    pipeline_id = get_id_from_name("pipeline", pipeline_github_commit_hash, alternate_key='github_commit_hash')
-   
+    
     with engine.connect() as conn:
             
         stmt = (
@@ -732,16 +677,15 @@ def insert_pulsarx(subbands_number, subint_length, clfd_q_value, fast_period_bin
             if return_id:
                 return pulsarx_id
    
-def insert_filtool(rfi_filter, telescope_name, threads, extra_args, container_image, container_version, container_type, container_image_id, pipeline_github_commit_hash, execution_order, argument_hash=None, return_id=False):
+def insert_filtool(rfi_filter, telescope_name, threads, container_image, container_version, container_type, container_image_id, extra_args=None, return_id=False):
     '''
     Insert Filtool parameters into the filtool_params table if it doesn't already exist
     '''
     filtool_table = get_table("filtool")
-    combined_args = f"{rfi_filter}{telescope_name}{threads}{extra_args}"
+    combined_args = f"{rfi_filter}{telescope_name}{threads}"
     # Generate SHA256 hash
     argument_hash = hashlib.sha256(combined_args.encode()).hexdigest()
     #Get pipeline id to add in execution order table
-    pipeline_id = get_id_from_name("pipeline", pipeline_github_commit_hash, alternate_key='github_commit_hash')
 
     with engine.connect() as conn:
                     
@@ -913,7 +857,110 @@ def insert_rfifind(time, time_sigma, freq_sigma, chan_frac, int_frac, ncpus, ext
 
     #insert_processing(2, "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUBMITTED", 1, 3, 1, "Peasoup", "123456") 
 
-def insert_processing(data_product_ids, pipeline_github_commit_hash, hardware_name, submit_time, process_status, attempt_number, max_attempts, execution_order, program_name, argument_hash, start_time=None, end_time=None, return_id=False):
+def insert_processing(data_product_ids, pipeline_id, hardware_id, attempt_number, max_attempts, execution_order, program_name, argument_hash, submit_time=None, start_time=None, end_time=None, process_status='CREATED', return_id=False):
+    '''
+    Insert or update a processing entry in the processing table if it doesn't already exist for the same data product, pipeline, hardware, and argument hash.
+    Now supports processing for multiple data_product_ids.
+    '''
+    processing_table = get_table("processing")
+    pipeline_table = get_table("pipeline")
+    hardware_table = get_table("hardware")
+    program_table = get_table(program_name)
+    foreign_column = f"{program_name}_id"
+    data_product_table = get_table("data_product")
+    processing_dp_table = get_table("processing_dp_inputs")
+    
+    with engine.connect() as conn:
+        # Check if the process with the same argument hash on the given data_product (first in list) is running on any hardware
+        stmt = (
+            select(processing_table)
+            .join(pipeline_table, pipeline_table.c.id == processing_table.c.pipeline_id)
+            .join(hardware_table, hardware_table.c.id == processing_table.c.hardware_id)
+            .join(program_table, program_table.c.id == getattr(processing_table.c, foreign_column))
+            .join(processing_dp_table, processing_table.c.id == processing_dp_table.c.processing_id)
+            .join(data_product_table, processing_dp_table.c.dp_id == data_product_table.c.id)
+            .where(pipeline_table.c.github_commit_hash == pipeline_github_commit_hash)
+            .where(program_table.c.argument_hash == argument_hash)
+            .where(processing_table.c.program_name == program_name)
+            .where(processing_dp_table.c.dp_id == data_product_ids[0])  # Only check the first data_product_id
+            .limit(1)
+        )
+        result = conn.execute(stmt).first()
+        
+        if result is None:
+            # Insert new processing if it doesn't exist for the first data_product_id
+            pipeline_id = get_id_from_name("pipeline", pipeline_github_commit_hash, alternate_key='github_commit_hash')
+            hardware_id = get_id_from_name("hardware", hardware_name)
+            program_id = get_id_from_name(program_name, argument_hash, alternate_key='argument_hash')
+            new_id = uuid.uuid4()  # Generate a UUID
+            binary_id = new_id.bytes  # Convert UUID to a 16-byte binary format
+            
+            
+            insert_values = {
+                "id": binary_id,
+                "pipeline_id": pipeline_id,
+                "hardware_id": hardware_id,
+                "submit_time": submit_time,
+                "process_status": process_status,
+                "attempt_number": attempt_number,
+                "max_attempts": max_attempts,
+                "start_time": start_time,
+                "end_time": end_time,
+                "execution_order": execution_order,
+                "program_name": program_name,
+                foreign_column: program_id
+            }
+            stmt = insert(processing_table).values(**insert_values)
+            db_update = conn.execute(stmt)
+            processing_id = db_update.lastrowid
+            conn.commit()
+            print(f"Added processing to processing table")
+            
+            # Insert into processing_dp_inputs table for each data_product_id
+            for data_product_id in data_product_ids:
+                processing_dp_id = uuid.uuid4()  # Generate a UUID
+                processing_dp_binary_id = processing_dp_id.bytes
+                stmt = insert(processing_dp_table).values(id = processing_dp_binary_id, processing_id=processing_id, dp_id=data_product_id)
+                conn.execute(stmt)
+            conn.commit()
+            
+            if return_id:
+                return processing_id
+        else:
+            processing_id = result[0]  # Assuming first column is the ID
+            # Check if there's a status update
+            if result.process_status != process_status or result.attempt_number != attempt_number:
+                # Update processing status, start_time, end_time, and attempt_number
+                stmt = (
+                    processing_table.update()
+                    .where(processing_table.c.id == processing_id)
+                    .values(process_status=process_status, start_time=start_time, end_time=end_time, attempt_number=attempt_number)
+                )
+                conn.execute(stmt)
+                conn.commit()
+                print(f"Updated status of processing with id {processing_id} to {process_status}")
+            else:
+                print(f"Processing already exists in processing table. Skipping...")
+            
+            # Insert into processing_dp_inputs table for each data_product_id if not already linked. Extra Check
+            for data_product_id in data_product_ids:
+                # Check if the processing_id and data_product_id link already exists
+                check_stmt = select(processing_dp_table).where(
+                    processing_dp_table.c.processing_id == processing_id,
+                    processing_dp_table.c.dp_id == data_product_id
+                )
+                link_exists = conn.execute(check_stmt).first()
+                if not link_exists:
+                    stmt = insert(processing_dp_table).values(processing_id=processing_id, dp_id=data_product_id)
+                    conn.execute(stmt)
+            conn.commit()
+            if return_id:
+                return processing_id
+
+
+
+
+def insert_processing_old(data_product_ids, pipeline_github_commit_hash, hardware_name, submit_time, process_status, attempt_number, max_attempts, execution_order, program_name, argument_hash, start_time=None, end_time=None, return_id=False):
     '''
     Insert or update a processing entry in the processing table if it doesn't already exist for the same data product, pipeline, hardware, and argument hash.
     Now supports processing for multiple data_product_ids.
@@ -1010,11 +1057,21 @@ def insert_processing(data_product_ids, pipeline_github_commit_hash, hardware_na
                                 
 
 
-def insert_data_product(beam_id, file_type_name, filename, filepath, filehash, available, upload_date, modification_date, metainfo, locked, utc_start, tsamp_seconds, tobs_seconds, nsamples, freq_start_mhz, freq_end_mhz, created_by_processing_id, hardware_name, hash_check=False, return_id=False, fft_size=None, tstart=None):
+
+def insert_data_product(beam_id, file_type_id, filename, filepath, available, locked, utc_start, tsamp_seconds, tobs_seconds, nsamples, freq_start_mhz, freq_end_mhz, hardware_id, nchans, nbits, hash_check=False, return_id=False, fft_size=None, tstart=None, filehash=None, metainfo=None, created_by_processing_id=None, modification_date=None):
     '''
-    Insert a new data product into the data_product table if it doesn't already exist
-    Checks if a data product with the same filepath and filename exists or, optionally, if hash_check is True, checks by filehash.
-    Optional feature to be added later. Join with beam table and check for same beam id before inserting.
+    Inserts a new data product into the `data_product` table if it doesn't already exist.
+    - Checks if a data product with the same filepath and filename exists or, if `hash_check` is True, checks by filehash.
+    - Optionally, can return the UUID of the inserted or existing row when `return_id` is set to True.
+    - Future Feature: Join with the beam table and check for the same beam_id before inserting.
+
+    Parameters:
+        - beam_id, file_type_id, etc.: Fields required for the data_product table.
+        - hash_check (bool): If True, checks existence based on filehash instead of filepath and filename.
+        - return_id (bool): If True, returns the UUID of the newly inserted or existing data product.
+
+    Returns:
+        - The UUID (str) of the inserted or existing data product if `return_id` is True. Otherwise, returns None.
     '''
     data_product_table = get_table("data_product")
 
@@ -1033,48 +1090,53 @@ def insert_data_product(beam_id, file_type_name, filename, filepath, filehash, a
                 select(data_product_table)
                 .where(data_product_table.c.filepath + data_product_table.c.filename == full_path)
                 .where(data_product_table.c.beam_id == beam_id)
+                .where(data_product_table.c.hardware_id == hardware_id)
                 .limit(1)
             )
 
         result = conn.execute(stmt).first()
+        #result = conn.execute(stmt).fetchone()
+        
         if result is None:
-            # Get file type id
-            file_type_id = get_id_from_name("file_type", file_type_name)
-            # Get hardware id
-            hardware_id = get_id_from_name("hardware", hardware_name)
 
+            new_id = uuid.uuid4()  # Generate a UUID
+            binary_id = new_id.bytes  # Convert UUID to a 16-byte binary format
+            
             stmt = insert(data_product_table).values(
+                id = binary_id,
                 beam_id=beam_id,
                 file_type_id=file_type_id,
                 filename=filename,
                 filepath=filepath,
                 filehash=filehash,
                 available=available,
-                upload_date=upload_date,
                 modification_date=modification_date,
                 metainfo=metainfo,
                 locked=locked,
                 utc_start=utc_start,
-                tsamp_seconds=tsamp_seconds,
-                tobs_seconds=tobs_seconds,
+                tsamp=tsamp_seconds,
+                tobs=tobs_seconds,
                 nsamples=nsamples,
                 freq_start_mhz=freq_start_mhz,
                 freq_end_mhz=freq_end_mhz,
                 created_by_processing_id=created_by_processing_id,
                 hardware_id=hardware_id,
                 fft_size=fft_size,
-                tstart=tstart
+                tstart=tstart,
+                nchans=nchans,
+                nbits=nbits
             )
             db_update = conn.execute(stmt)
             conn.commit()
             print(f"Added data product to data_product table")
             if return_id:
-                data_product_id = db_update.lastrowid
+                data_product_id = str(new_id)
                 return data_product_id
         else:
             print(f"Data product already exists in data_product table. Skipping...")
             if return_id:
-                return result[0]
+                existing_uuid = uuid.UUID(bytes=bytes(result[0]))
+                return str(existing_uuid)
 
 
 def insert_search_candidate(pointing_id, beam_id, processing_id, spin_period, dm, snr, filename, filepath, nh, dp_id, candidate_id_in_file, pdot=None, pdotdot=None, pb=None, x=None, t0=None, omega=None, e=None, ddm_count_ratio=None, ddm_snr_ratio=None, nassoc=None, metadata_hash=None, candidate_filter_id=None, return_id=False):
@@ -1185,22 +1247,22 @@ def insert_beam_antenna(antenna_name, beam_id, description=None, return_id=False
  # A combination of unique utc_start, project_name, telescope_name, freq_band and target_name identifies a unique pointing.
 
 
-def setup_argparse():
-    """Setup the command line arguments for the script"""
-    parser = argparse.ArgumentParser(description='Upload Data to Database and write keys to file')
-    parser.add_argument('--project_name', type=str, help='Project Name', required=True)
-    parser.add_argument('--telescope_name', type=str, help='Telescope Name', required=True)
-    #parser.add_argument('--freq_band', type=str, help='Frequency Band', required=True)
-    parser.add_argument('--target_name', type=str, help='Target Name', required=True)
-    parser.add_argument('--beam_name', type=str, help='Beam Name', required=True)
-    parser.add_argument('--beam_type_name', type=str, help='Beam Type', required=True)
-    parser.add_argument('--is_coherent', type=int, choices=[0, 1], default=1, help='Beam Type. Accepts 0 or 1. Defaults to 1.')
-    #parser.add_argument('--file_type_name', type=str, help='File Type', required=True)
-    parser.add_argument('--raw_data', type=str, help='Raw Data Directory', required=True)
-    parser.add_argument('--obs_header', type=str, help='Observation header file', required=True)
-    parser.add_argument('--hardware_name', type=str, help='Hardware name', required=True)
+# def setup_argparse():
+#     """Setup the command line arguments for the script"""
+#     parser = argparse.ArgumentParser(description='Upload Data to Database and write keys to file')
+#     parser.add_argument('--project_name', type=str, help='Project Name', required=True)
+#     parser.add_argument('--telescope_name', type=str, help='Telescope Name', required=True)
+#     #parser.add_argument('--freq_band', type=str, help='Frequency Band', required=True)
+#     parser.add_argument('--target_name', type=str, help='Target Name', required=True)
+#     parser.add_argument('--beam_name', type=str, help='Beam Name', required=True)
+#     parser.add_argument('--beam_type_name', type=str, help='Beam Type', required=True)
+#     parser.add_argument('--is_coherent', type=int, choices=[0, 1], default=1, help='Beam Type. Accepts 0 or 1. Defaults to 1.')
+#     #parser.add_argument('--file_type_name', type=str, help='File Type', required=True)
+#     parser.add_argument('--raw_data', type=str, help='Raw Data Directory', required=True)
+#     parser.add_argument('--obs_header', type=str, help='Observation header file', required=True)
+#     parser.add_argument('--hardware_name', type=str, help='Hardware name', required=True)
 
-    return parser
+#     return parser
 
     
 def parse_meertime_obs_header(file_path):
@@ -1237,6 +1299,7 @@ def get_tobs_and_metadata(data):
     first_header = your.Your(data[0]).your_header
     last_header = your.Your(data[-1]).your_header
     central_freq = first_header.center_freq
+   
 
     # Calculate total observation time.
     # (number of files - 1) * (number of spectra in a file * time per sample) + (spectra in last file * time per sample)
@@ -1244,6 +1307,39 @@ def get_tobs_and_metadata(data):
     lowest_freq = central_freq - first_header.bw/2
     highest_freq = central_freq + first_header.bw/2
     return tobs, lowest_freq, highest_freq
+
+def get_metadata_of_all_files(data):
+    """
+    Extract metadata from all files in the list.
+
+    Parameters:
+    - data: A list of file paths.
+
+    Returns:
+    - A list of dictionaries containing metadata for each file.
+    """
+    metadata = []
+    for file in data:
+        header = your.Your(file).your_header
+        central_freq = header.center_freq
+        bandwidth = header.bw
+        lowest_freq = central_freq - bandwidth/2
+        highest_freq = central_freq + bandwidth/2
+
+        metadata.append({
+            "filename": os.path.basename(header.filename),
+            "filepath": os.path.dirname(header.filename),
+            "tstart_utc": header.tstart_utc.replace("T", " "),
+            "tsamp": header.tsamp,
+            "tobs": header.tsamp * header.nspectra,
+            "nsamples": header.nspectra,
+            "freq_start_mhz": lowest_freq,
+            "freq_end_mhz": highest_freq,
+            "nchans": header.nchans,
+            "nbits": header.nbits,
+            "tstart": header.tstart
+        })
+    return metadata
 
 def get_meerkat_freq_band(freq):
     """
@@ -1267,7 +1363,6 @@ def get_meerkat_freq_band(freq):
     else:
         return "UHF"
  
-from datetime import datetime
 
 def parse_and_format_datetime(datetime_str):
     """
@@ -1287,163 +1382,473 @@ def parse_and_format_datetime(datetime_str):
         datetime_str += '.0'
         return datetime_str
     
+
+def parse_nextflow_config(file_path):
+    config = {}
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Strip leading/trailing whitespace
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('//'):
+                continue
+            # Split line into key and value at the first '='
+            if '=' in line:
+                key, value = line.split('=', 1)
+                # Trim whitespace and remove surrounding quotes from value
+                key = key.strip()
+                value = value.strip().strip('"')
+                # Store in config dictionary
+                config[key] = value
+    return config
+
+
+def get_repo_details():
+    try:
+        # Get the remote repository URL
+        remote_url = subprocess.check_output(
+            ["git", "config", "--get", "remote.origin.url"], 
+            universal_newlines=True
+        ).strip()
+
+        # Extract the repo name from the URL
+        repo_name = remote_url.split('/')[-1].replace('.git', '')
+
+        # Get the current branch name
+        branch_name = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], 
+            universal_newlines=True
+        ).strip()
+
+        # Get the last commit ID
+        last_commit_id = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], 
+            universal_newlines=True
+        ).strip()
+
+        
+        return repo_name, branch_name, last_commit_id
+        
+    except subprocess.CalledProcessError as e:
+        print("An error occurred while trying to retrieve repository details")
+        return None
+
+
+def parse_nextflow_flat_config_from_file(file_path):
+    config = {}
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Split each line by the first '=' to separate the key and value
+            if "=" in line:
+                key, value = line.split("=", 1)
+                # Trim whitespace and remove surrounding quotes from the value if present
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                config[key] = value
+    return config
+
+
+
+def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs, output_filename='raw_dp_with_ids.json'):
+    """
+    Generates a JSON file organizing data products for multiple programs along with pipeline and hardware id.
     
-
-
-
+    Parameters:
+    - pipeline_id (int): The unique identifier for the pipeline.
+    - hardware_id (int): The unique identifier for the hardware.
+    - beam_id (int): The unique identifier for the beam.
+    - programs (list of dicts): List of program configurations. Each dictionary should have:
+        - program_name (str): The name of the program (e.g., "filtool", "peasoup").
+        - program_id (int): The unique identifier for the program.
+        - output_file_id (int): Output file type ID for the program.
+        - data_products (list of tuples): Each tuple contains a data product ID and its associated filename.
+    - output_filename (str, optional): The name of the output JSON file. Default is 'raw_dp_with_ids.json'.
     
+    The generated JSON structure will be:
+    {
+        "pipeline_id": <pipeline_id>,
+        "hardware_id": <hardware_id>,
+        "beam_id": <beam_id>,
+        "programs": [
+            {
+                "program_name": <program_name>,
+                "program_id": <program_id>,
+                "output_file_id": <output_file_id>,
+                "data_products": [
+                    {"dp_id": <data_product_id>, "filename": <filename>},
+                    ...
+                ]
+            },
+            ...
+        ]
+    }
+    
+    Example Usage:
+    dump_program_data_products_json(1, 2, 3, [
+        {"program_name": "filtool", "program_id": 100, "output_file_id": 200, "data_products": [("dp1", "file1.fil"), ("dp2", "file2.fil")]},
+        {"program_name": "peasoup", "program_id": 101, "output_file_id": 201, "data_products": [("dp3", "file3.ps"), ("dp4", "file4.ps")]}
+    ])
+    """
+    
+    json_data = {
+        'pipeline_id': pipeline_id,
+        'hardware_id': hardware_id,
+        'beam_id': beam_id,
+        'programs': [
+            {
+                'program_name': program['program_name'],
+                'program_id': program['program_id'],
+                'output_file_id': program['output_file_id'],
+                'data_products': [
+                    {'dp_id': dp_id, 'filename': filename} for dp_id, filename in program['data_products']
+                ]
+            } for program in programs
+        ]
+    }
+    
+    with open(output_filename, 'w') as f:
+        json.dump(json_data, f, indent=4)
+    
+    print(f"Data products JSON file created: {output_filename}")
+
+
+def initialize_configs(file_path):
+    """
+    Parses the config file and extracts relevant parameters.
+    """
+    nextflow_config = parse_nextflow_flat_config_from_file(file_path)
+    params = {
+        'project_name': nextflow_config['params.project'],
+        'pipeline_name': nextflow_config['params.pipeline_name'],
+        'telescope_name': nextflow_config['params.telescope'],
+        'target_name': nextflow_config['params.target'],
+        'beam_name': nextflow_config['params.beam'],
+        'beam_type': nextflow_config['params.beam_type'],
+        'is_coherent_flag': nextflow_config['params.is_beam_coherent'],
+        'data_header': nextflow_config['params.obs_header'],
+        'raw_data': nextflow_config['params.raw_data'],
+        'hardware_name': nextflow_config['params.hardware']
+    }
+    return params
+
+def insert_basic_records(params):
+    """
+    Inserts basic records into the database and returns their IDs.
+    """
+    project_id = insert_project_name(params['project_name'], return_id=True)
+    telescope_id = insert_telescope_name(params['telescope_name'], return_id=True)
+    hardware_id = insert_hardware(params['hardware_name'], return_id=True)
+    return project_id, telescope_id, hardware_id
+
+def setup_programs(telescope_name, docker_image_hashes):
+    """
+    Setup program configurations.
+    """
+    filtool = {
+        'program_name': 'filtool',
+        'rfi_filter': nextflow_config['params.filtool.rfi_filter'],
+        'threads': nextflow_config['params.filtool.threads'],
+        'image_name': os.path.basename(nextflow_config['params.fold_singularity_image']),
+        'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0],
+        'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0],
+        'container_type': "singularity"
+    }
+    peasoup = {
+        'program_name': 'peasoup',
+        'acc_start': nextflow_config['params.peasoup.acc_start'],
+        'acc_end': nextflow_config['params.peasoup.acc_end'],
+        'min_snr': nextflow_config['params.peasoup.min_snr'],
+        'ram_limit_gb': nextflow_config['params.peasoup.ram_limit_gb'],
+        'nh': nextflow_config['params.peasoup.nh'],
+        'ngpus': nextflow_config['params.peasoup.ngpus'],
+        'total_cands_limit': nextflow_config['params.peasoup.total_cands_limit'],
+        'fft_size': nextflow_config['params.peasoup.fft_size'],
+        'dm_file': nextflow_config['params.peasoup.dm_file'],
+        'image_name': os.path.basename(nextflow_config['params.search_singularity_image']),
+        'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'SHA256'].values[0],
+        'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'Version'].values[0],
+        'container_type': "singularity"
+    }
+    return filtool, peasoup
+
+
+def parse_config_and_initialize(file_path):
+    """
+    Parses configuration file and extracts parameters.
+    """
+    nextflow_config = parse_nextflow_flat_config_from_file(file_path)
+    config = {
+        'project_name': nextflow_config['params.project'],
+        'pipeline_name': nextflow_config['params.pipeline_name'],
+        'telescope_name': nextflow_config['params.telescope'],
+        'target_name': nextflow_config['params.target'],
+        'beam_name': nextflow_config['params.beam'],
+        'beam_type': nextflow_config['params.beam_type'],
+        'is_coherent_flag': nextflow_config['params.is_beam_coherent'],
+        'data_header': nextflow_config['params.obs_header'],
+        'raw_data': nextflow_config['params.raw_data'],
+        'hardware_name': nextflow_config['params.hardware']
+    }
+    return config
+
+def extract_observation_details(data_header):
+    """
+    Extracts detailed observation parameters from the header of meertime observations. This is the coordinates for the boresight!
+    """
+    obs_header = parse_meertime_obs_header(data_header)
+    header_config = {
+        'ra': obs_header['TIED_BEAM_RA'],
+        'dec': obs_header['TIED_BEAM_DEC'],
+        'utc_start_str': obs_header['UTC_START'],
+        'antenna_list': obs_header['ANTENNAE'],
+        'nchans': obs_header['SEARCH_OUTNCHAN'],
+        'tsamp': float(obs_header['SEARCH_OUTTSAMP']) * 1e-6,
+        'central_freq': round(float(obs_header['FREQ']), 2),
+        'receiver': obs_header['RECEIVER']
+    }
+    return header_config
+
+def insert_observational_records(params, obs_details, project_id, telescope_id):
+    """
+    Inserts observational records into the database and returns their IDs. This is survey dependent and needs to be modified for other surveys.
+    """
+    target_id = insert_target_name(params['target_name'], obs_details['ra'], obs_details['dec'], project_id, return_id=True)
+    data = glob.glob(params['raw_data'])
+    tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
+
+    if params['telescope_name'].lower() == "meerkat":
+        freq_band = get_meerkat_freq_band(obs_details['central_freq'])
+    else:
+        freq_band = "UNKNOWN"
+
+    pointing_id = insert_pointing(
+        parse_and_format_datetime(obs_details['utc_start_str']),
+        tobs,  
+        obs_details['nchans'],
+        freq_band,
+        target_id,
+        lowest_freq,
+        highest_freq,
+        obs_details['tsamp'],
+        telescope_id,
+        obs_details['receiver'],
+        return_id=True
+    )
+    beam_type_id = insert_beam_type(params['beam_type'], return_id=True)
+    beam_id = insert_beam(params['beam_name'], obs_details['ra'], obs_details['dec'], pointing_id, beam_type_id, obs_details['tsamp'], is_coherent=params['is_coherent_flag'], return_id=True)
+    #Get file extension name and remove dot
+    file_type_extension = os.path.splitext(data[0])[1][1:]  
+    file_type_id = insert_file_type(file_type_extension, return_id=True)
+
+    return target_id, pointing_id, beam_id, beam_type_id, file_type_id
+
+def setup_programs(config, docker_image_hashes):
+    """
+    Configures program parameters.
+    """
+    return [
+        {
+            'program_name': 'filtool',
+            'program_id': config['filtool_id'],
+            'output_file_id': config['filtool_output_file_type_id'],
+            'data_products': config['raw_data_with_id']
+        },
+        {
+            'program_name': 'peasoup',
+            'program_id': config['peasoup_id'],
+            'output_file_id': config['peasoup_output_file_type_id'],
+            'data_products': config['raw_data_with_id']
+        }
+    ]
+
+def insert_data_products(data_products, beam_id, file_type_id, hardware_id):
+    """
+    Inserts multiple data products into the database and collects their IDs along with file paths.
+
+    Parameters:
+    - data_products (list): List of dictionaries containing data product metadata.
+    - beam_id (int): ID of the beam associated with these data products.
+    - file_type_id (int): ID of the file type for these data products.
+    - hardware_id (int): ID of the hardware used to collect these data products.
+
+    Returns:
+    - list of lists: Each inner list contains the data product ID and the concatenated file path and filename.
+    """
+    raw_data_with_id = []
+    data_available_flag = 1  # Assuming these are static flags as per your previous setup
+    file_locked_flag = 0
+
+    for dp in data_products:
+        dp_id = insert_data_product(
+            beam_id, file_type_id, dp['filename'], dp['filepath'],
+            data_available_flag, file_locked_flag, dp['tstart_utc'], dp['tsamp'],
+            dp['tobs'], dp['nsamples'], dp['freq_start_mhz'], dp['freq_end_mhz'],
+            hardware_id, dp['nchans'], dp['nbits'], tstart=dp['tstart'], return_id=True
+        )
+        # Storing the data product ID along with its filepath and filename
+        raw_data_with_id.append([dp_id, os.path.join(dp['filepath'], dp['filename'])])
+
+    return raw_data_with_id
 
 
 def main():
-    
-    
+    #Run this first before upload_data.py
+    #nextflow config -profile nt -flat -sort > data_config.cfg
+    file_path = 'data_config.cfg'
+    params = parse_config_and_initialize(file_path)
+    project_id, telescope_id, hardware_id = insert_basic_records(params)
+    obs_details = extract_observation_details(params['data_header'])
+    print(params)
+    print(obs_details)
+  
 
-    parser = setup_argparse()
-    args = parser.parse_args()
-    project_name = args.project_name
-    telescope_name = args.telescope_name
-    target_name = args.target_name
-    data_header = args.obs_header
-    raw_data = args.raw_data
-    beam_type = args.beam_type_name
-    is_coherent_flag = args.is_coherent
-    hardware_name = args.hardware_name
-
-    project_id = insert_project_name(project_name, return_id=True)
-    telescope_id = insert_telescope_name(telescope_name, return_id=True)
-    obs_header = parse_meertime_obs_header(data_header)
-    ra = obs_header['TIED_BEAM_RA']
-    dec = obs_header['TIED_BEAM_DEC']
-    utc_start_str = obs_header['UTC_START']
-    antenna_list = obs_header['ANTENNAE']
-    utc_start = parse_and_format_datetime(utc_start_str)
-    beam_name = args.beam_name
-    
-    nchans = obs_header['SEARCH_OUTNCHAN']
-    tsamp = float(obs_header['SEARCH_OUTTSAMP']) * 1e-6
-    central_freq = round(float(obs_header['FREQ']), 2)
-    receiver = obs_header['RECEIVER']
-    data = sorted(glob.glob(raw_data))
-    tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
-    if telescope_name.lower() == "meerkat":
-        freq_band = get_meerkat_freq_band(central_freq)
-    else:
-        freq_band = "UNKNOWN"
-    print(obs_header)
-    target_id = insert_target_name(target_name, ra, dec, project_id, return_id=True)
-    pointing_id = insert_pointing(utc_start, tobs, nchans, freq_band, target_id, lowest_freq, highest_freq, tsamp, telescope_id, receiver, return_id=True)
-    beam_type_id = insert_beam_type(beam_type, return_id=True)
-    beam_id = insert_beam(beam_name, ra, dec, pointing_id, beam_type_id, tsamp, is_coherent=is_coherent_flag, return_id=True)
-    hardware_id = insert_hardware(hardware_name, return_id=True)
-    #get extension of first file
-    file_type_extension = os.path.splitext(data[0])[1][1:]
-    file_type_id = insert_file_type(file_type_extension, return_id=True)
-    print(file_type_extension, file_type_id)
-
-    print(antenna_list)
-    #iterate through antenna list and add to beam_antenna table
-    # for antenna in antenna_list:
-    #     insert_beam_antenna(antenna, beam_id)
-    
-    
+    # Retrieve repo and other metadata
+    repo_name, branch_name, last_commit_id = get_repo_details()
+    pipeline_id = insert_pipeline(params['pipeline_name'], repo_name, last_commit_id, branch_name, description='Time Domain Full length Accel Search using Peasoup', return_id=True)
     
    
-
-    
-   
-
-    
-   
-   
-    
-
-    # for i in range(64):
-    #     insert_antenna(f"MK{i:03d}", "MeerKAT", description= f"MeerKAT Antenna {i}")
-
-    # insert_antenna("EF000", "Effelsberg", description= "Effelsberg Antenna")
-    # insert_antenna("PK000", "Parkes", description= "Parkes Antenna")
-    # insert_antenna("GB000", "GBT", description= "GBT Antenna")
-    # print_table("antenna")
-    
-    
-
-
+    # Insert target and pointing data
+    target_id, pointing_id, beam_id, beam_type_id, file_type_id = insert_observational_records(params, obs_details, project_id, telescope_id)
 
     
     
-    # # #insert_beam("cfbf00000", "21:40:22.4100", "-23:10:48.8000", 1, 1, 0.000256, True)
-    
-    #insert_beam_antenna(1, 1, description="Incoherent beam 1")
-    #print_table("beam_antenna")
-
-    # insert_hardware("Contra", job_scheduler="ht-condor", hardware_description="Contra HPC in Dresden")
-    # insert_hardware("Hercules", job_scheduler="slurm", hardware_description="Hercules HPC in Garching")
-    # insert_hardware("OzSTAR", job_scheduler="slurm", hardware_description="OzSTAR HPC in Melbourne")
-    # insert_hardware("Ngarrgu", job_scheduler="slurm",hardware_description= "Ngarrgu Tindebeek HPC in Melbourne")
-    # insert_hardware("AWS", job_scheduler="aws", hardware_description="Amazon Web Services")
-    # print_table("hardware")
-    
-    # insert_pipeline("Peasoup", "peasoup", "123456", "main", "Peasoup Time-Domain Acceleration Search Pipeline")
-    # insert_pipeline("Presto", "presto", "123456", "main", "PRESTO Frequency-Domain Acceleration Search Pipeline")
-    # print_table("pipeline")
-    # insert_peasoup(-10.0, 10.0, 9.0, 50.0, 16, 1, 10000, 4294967296, "dm_list.txt", 1.11, "birdies.txt", "mask.txt", "--nsub 32 --npart 32", "docker.io/compact/peasoup", "1.0", "docker", "abcde", "123456", 1)
-    # print_table("peasoup")
-    # insert_data_product(1, "filterbank", "Ter5_cfbf00000.fil", "/datax/scratch/compact/cbf/cbf00000", "123456", True, "2021-01-30-11:54:02.05986", "2021-01-30-11:54:02.05986", "metainfo", False, "2021-01-30-11:54:02.05986", 0.000256, 900.0, 1500.0, 4096, 900.0, None, "Hercules", tstart=60000.0, fft_size=16777216)
-    # insert_data_product(1, "filterbank", "Ter5_cfbf00001.fil", "/datax/scratch/compact/cbf/cbf00000", "123456", True, "2021-01-30-11:54:02.05986", "2021-01-30-11:54:02.05986", "metainfo", False, "2021-01-30-11:54:02.05986", 0.000256, 900.0, 1500.0, 4096, 900.0, None, "Hercules", tstart=60000.0, fft_size=16777216)
-    # insert_data_product(1, "filterbank", "Ter5_cfbf00002.fil", "/datax/scratch/compact/cbf/cbf00000", "123456", True, "2021-01-30-11:54:02.05986", "2021-01-30-11:54:02.05986", "metainfo", False, "2021-01-30-11:54:02.05986", 0.000256, 900.0, 1500.0, 4096, 900.0, None, "Hercules", tstart=60000.0, fft_size=16777216)
-
-    #print_table("data_product")
-
-    # insert_pulsarx(64, 32, 2.0, 64, 100, "zdot", "--nsub 32 --npart 32", 2, "docker.io/compact/pulsarx", "1.0", "docker", "abcde", "123456", 2)
-    # print_table("pulsarx")
-    # insert_prepfold(32, "mask.txt", "--nsub 32 --npart 32", "docker.io/compact/prepfold", "1.0", "docker", "abcde", "123456", 3)
-    # print_table("prepfold")
-    # insert_filtool("kadane", "MeerKAT", 12, "--nsub 32 --npart 32", "docker.io/compact/filtool", "1.0", "docker", "abcde", "123456", 4)
-    # print_table("filtool")
-    #insert_circular_orbit_search(1, 100.0, 1.2, 10.0, 0.0, 2 * func.pi(), 0.9, 0.2, "docker.io/compact/circular_orbit_search", "1.0", "docker", "abcde", "123456", 5)
-    #print_table("circular_orbit_search")
-    #insert_elliptical_orbit_search(1, 100.0, 1.2, 10.0, 0.0, 2 * func.pi(), 0.0, 0.5, 0.0, 2 * func.pi(), 0.9, 0.1, "docker.io/compact/elliptical_orbit_search", "1.0", "docker", "abcde", "123456", 6)
-    #print_table("elliptical_orbit_search")
-    #insert_rfifind(2.0, 4.0, 2.0, 0.7, 0.3, 4, "--nsub 32 --npart 32", "docker.io/compact/rfifind", "1.0", "docker", "abcde", "123456", 7)
-    #print_table("rfifind")
-   
-    
-    # insert_processing([1], "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUBMITTED", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4") 
-    # insert_processing([1], "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUCCESS", 1, 3, 2, "pulsarx", "7868d85ceb2a461af964bcb4fc45842b7c560fdd16080cd37f2cbf0f1de79bb6", start_time="2021-01-30-11:54:02.05986", end_time="2021-01-30-12:54:02.05986")
-
-    # insert_processing([2,3], "123456", "Hercules", "2021-01-30-11:54:02.05986", "RUNNING", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4", start_time="2021-01-30-11:54:02.05986")
-    # insert_processing([2,3], "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUCCESS", 1, 3, 2, "pulsarx", "7868d85ceb2a461af964bcb4fc45842b7c560fdd16080cd37f2cbf0f1de79bb6", start_time="2021-01-30-11:54:02.05986", end_time="2021-01-30-13:54:02.05986") 
-    # insert_processing([2], "123456", "Hercules", "2021-01-30-11:54:02.05986", "RUNNING", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4", start_time="2021-01-30-11:54:02.05986") 
-
-    # print_table("processing")
-    # print_table("processing_dp_inputs")
-    # #Status Update
-    # insert_processing([1], "123456", "Hercules", "2021-01-30-11:54:02.05986", "RUNNING", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4", start_time="2021-01-30-11:54:02.05986") 
-    # print_table("processing")
-    # # #Status Update
-    # insert_processing([1], "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUCCESS", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4", start_time="2021-01-30-11:54:02.05986", end_time="2021-01-30-12:54:02.05986")
-    # insert_processing([2,3], "123456", "Hercules", "2021-01-30-11:54:02.05986", "SUCCESS", 1, 3, 1, "peasoup", "82ce5f6b29812d30595576dc7c43826c79da18e788ccf3559f06b541ffa247c4", start_time="2021-01-30-11:54:02.05986", end_time="2021-01-30-13:54:02.05986")
-    # insert_candidate_filter_name("zero_dm", "zero dm filter")
-    # print_table("candidate_filter")
-    #insert_search_candidate(1, 1, 1, 0.02112, 200.0, 50.0, "Ter5_cfbf00000.xml", "/datax/scratch/compact/cbf/cbf00000", 4, 1, 1, pdot=1e-10, pdotdot=0.0)
-    #print_table("search_candidate")
-
-    # insert_fold_candidate(1, 1, 1, 0.05111, 200.0, 1e-9, 0.0, 50.0, "Ter5_cfbf00000.ar", "/datax/scratch/compact/cbf/cbf00000", 2, 1)
-    # print_table("fold_candidate")
-    #insert_user("vishnu", "Vishnu Balakrishnan", "vishnu@mpifr-bonn.mpg.de", "123456", administrator=1)
-    #insert_user("vivek", "Vivek Krishnan", "vkrishnan@mpifr-bonn.mpg.de", "654321", administrator=1)
-    # print_table("user")
-    
-    # insert_user_labels(1, 1, rfi=1)
-    # insert_user_labels(1, 2, noise=1)
-    # print_table("user_labels")
-
-    
+    # Get additional metadata for files and types
+    data_products = get_metadata_of_all_files(sorted(glob.glob(params['raw_data'])))
     
 
+    # Data product insertion
+    raw_data_with_id = insert_data_products(data_products, beam_id, file_type_id, hardware_id)
+    print(raw_data_with_id)
+    sys.exit()
+    
+    # Read docker image hashes
+    docker_image_hashes = pd.read_csv('docker_image_digests.csv')
+    programs_config = setup_programs({
+        'filtool_id': 100,  # Example ID
+        'peasoup_id': 101,  # Example ID
+        'filtool_output_file_type_id': 200,  # Example output file type ID
+        'peasoup_output_file_type_id': 201,  # Example output file type ID
+        'raw_data_with_id': raw_data_with_id
+    }, docker_image_hashes)
 
+    # Dump JSON with the updated function that handles multiple programs
+    dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs_config)
 
-   
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+
+
+
+
+# def main():
+#     #Run this first before upload_data.py
+#     #nextflow config -profile nt -flat -sort > data_config.cfg
+    
+    
+#     file_path = 'data_config.cfg'
+#     nextflow_config = parse_nextflow_flat_config_from_file(file_path)
+    
+#     project_name = nextflow_config['params.project']
+#     pipeline_name = nextflow_config['params.pipeline_name']
+#     telescope_name = nextflow_config['params.telescope']
+#     target_name = nextflow_config['params.target']
+#     beam_name = nextflow_config['params.beam']
+#     beam_type = nextflow_config['params.beam_type']
+#     is_coherent_flag = nextflow_config['params.is_beam_coherent']
+#     data_header = nextflow_config['params.obs_header']
+#     raw_data = nextflow_config['params.raw_data']
+#     hardware_name = nextflow_config['params.hardware']
+#     repo_name, branch_name, last_commit_id = get_repo_details()
+#     project_id = insert_project_name(project_name, return_id=True)
+#     telescope_id = insert_telescope_name(telescope_name, return_id=True)
+#     obs_header = parse_meertime_obs_header(data_header)
+#     ra = obs_header['TIED_BEAM_RA']
+#     dec = obs_header['TIED_BEAM_DEC']
+#     utc_start_str = obs_header['UTC_START']
+#     antenna_list = obs_header['ANTENNAE']
+#     utc_start = parse_and_format_datetime(utc_start_str)
+#     nchans = obs_header['SEARCH_OUTNCHAN']
+#     tsamp = float(obs_header['SEARCH_OUTTSAMP']) * 1e-6
+#     central_freq = round(float(obs_header['FREQ']), 2)
+#     receiver = obs_header['RECEIVER'] CHECKED!
+#     data = sorted(glob.glob(raw_data))
+#     dp_metadata = get_metadata_of_all_files(data)
+#     tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
+#     if telescope_name.lower() == "meerkat":
+#         freq_band = get_meerkat_freq_band(central_freq)
+#     else:
+#         freq_band = "UNKNOWN"
+    
+
+#     docker_image_hashes = pd.read_csv('docker_image_digests.csv')
+   
+#     target_id = insert_target_name(target_name, ra, dec, project_id, return_id=True)
+#     pointing_id = insert_pointing(utc_start, tobs, nchans, freq_band, target_id, lowest_freq, highest_freq, tsamp, telescope_id, receiver, return_id=True)
+#     beam_type_id = insert_beam_type(beam_type, return_id=True)
+#     beam_id = insert_beam(beam_name, ra, dec, pointing_id, beam_type_id, tsamp, is_coherent=is_coherent_flag, return_id=True)
+#     hardware_id = insert_hardware(hardware_name, return_id=True)
+#     #get extension of first file
+#     file_type_extension = os.path.splitext(data[0])[1][1:]
+#     file_type_id = insert_file_type(file_type_extension, return_id=True)
+
+
+    
+#     data_available_flag = 1
+#     file_locked_flag = 0
+    
+    
+#     #Add all data_products to the database
+#     raw_data_with_id = []
+#     for dp in dp_metadata:
+#        dp_id = insert_data_product(beam_id, file_type_id, dp['filename'], dp['filepath'], data_available_flag, file_locked_flag, dp['tstart_utc'], dp['tsamp'], dp['tobs'], dp['nsamples'], dp['freq_start_mhz'], dp['freq_end_mhz'], hardware_id, dp['nchans'], dp['nbits'], tstart = dp['tstart'], return_id=True)
+#        raw_data_with_id.append([dp_id, dp['filepath'] + '/' + dp['filename']])
+    
+
+#     pipeline_id = insert_pipeline(pipeline_name, repo_name, last_commit_id, branch_name, description='Time Domain Full length Accel Search using Peasoup', return_id=True)
+#     #Filtool parameters
+#     filtool_rfi_filter = nextflow_config['params.filtool.rfi_filter']
+#     filtool_threads = nextflow_config['params.filtool.threads']
+#     filtool_output_filename = f'{target_name}_{freq_band}_{utc_start}_{beam_name}'
+#     filtool_source_name = target_name
+#     filtool_image_name = os.path.basename(nextflow_config['params.fold_singularity_image'])
+#     filtool_extra_args = None
+#     filtool_hash = docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0]
+#     filtool_version = docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0]
+#     container_type = "singularity"
+#     filtool_id = insert_filtool(filtool_rfi_filter, telescope_name, filtool_threads, filtool_image_name, filtool_version, container_type, filtool_hash, return_id=True, extra_args=filtool_extra_args)
+#     first_program = 'filtool'
+#     output_file_type_name = 'fil'
+#     filtool_output_file_type_id = insert_file_type(output_file_type_name, return_id=True)
+    
+#     #Peasoup parameters
+#     peasoup_acc_start = nextflow_config['params.peasoup.acc_start']
+#     peasoup_acc_end = nextflow_config['params.peasoup.acc_end']
+#     peasoup_min_snr = nextflow_config['params.peasoup.min_snr']
+#     peasoup_ram_limit_gb = nextflow_config['params.peasoup.ram_limit_gb']
+#     peasoup_nh = nextflow_config['params.peasoup.nh']
+#     peasoup_ngpus = nextflow_config['params.peasoup.ngpus']
+#     peasoup_total_cands_limit = nextflow_config['params.peasoup.total_cands_limit']
+#     peasoup_fft_size = nextflow_config['params.peasoup.fft_size']
+#     peasoup_dm_file = nextflow_config['params.peasoup.dm_file']
+#     peasoup_image_name = os.path.basename(nextflow_config['params.search_singularity_image'])
+#     peasoup_extra_args = None
+#     peasoup_hash = docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'SHA256'].values[0]
+#     peasoup_version = docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'Version'].values[0]
+    
+#     peasoup_accel_tol = nextflow_config['params.peasoup.accel_tol']
+#     peasoup_birdie_list = nextflow_config['params.peasoup.birdie_list']
+#     peasoup_chan_mask = nextflow_config['params.peasoup.chan_mask']
+#     print(peasoup_birdie_list, peasoup_chan_mask)
+#     peasoup_id = insert_peasoup(peasoup_acc_start, peasoup_acc_end, peasoup_min_snr, peasoup_ram_limit_gb, \
+#                                 peasoup_nh, peasoup_ngpus, peasoup_total_cands_limit, peasoup_fft_size, \
+#                                 peasoup_dm_file, peasoup_image_name, peasoup_version, container_type, \
+#                                 peasoup_hash, peasoup_accel_tol, return_id=True) 
+    
+#     output_file_type_name = 'xml'
+#     peasoup_output_file_type_id = insert_file_type(output_file_type_name, return_id=True)
+
+
+#     dump_program_data_products_json(pipeline_id, hardware_id, beam_id, first_program, filtool_id, filtool_output_file_type_id, raw_data_with_id)
+   
+    
+

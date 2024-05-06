@@ -1,0 +1,67 @@
+{
+    "namespace": "org.compact-erc",
+    "type": "record",
+    "name": "UserLabels",
+    "fields": [
+      {
+        "name": "id",
+        "type": "int"
+      },
+      {
+        "name": "fold_candidate_id",
+        "type": ["null", "string"],
+        "default": null
+      },
+      {
+        "name": "rfi",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "noise",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "t1_cand",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "t2_cand",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "known_pulsar",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "nb_psr",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "is_harmonic",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "is_confirmed_pulsar",
+        "type": ["null", "boolean"],
+        "default": null
+      },
+      {
+        "name": "pulsar_name",
+        "type": ["null", "string"],
+        "default": null
+      },
+      {
+        "name": "user_id",
+        "type": ["null", "int"],
+        "default": null
+      }
+    ]
+  }
+  

@@ -1,0 +1,44 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Beam",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "ra_str",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dec_str",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pointing_id",
+      "type": "int"
+    },
+    {
+      "name": "beam_type_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "tsamp",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "is_coherent",
+      "type": ["null", "boolean"],
+      "default": null
+    }
+  ]
+}

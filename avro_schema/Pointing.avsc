@@ -1,0 +1,61 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Pointing",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "utc_start",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tobs",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "nchan_raw",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "freq_band",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "target_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "freq_start_mhz",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "freq_end_mhz",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tsamp_raw",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "telescope_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "receiver",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

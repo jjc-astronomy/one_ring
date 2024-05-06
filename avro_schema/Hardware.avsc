@@ -1,0 +1,25 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Hardware",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "job_scheduler",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

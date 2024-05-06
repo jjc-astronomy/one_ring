@@ -1,0 +1,96 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "EllipticalOrbitSearch",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "min_porb_h",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_porb_h",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "min_pulsar_mass_m0",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_comp_mass_m0",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "min_orb_phase_rad",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_orb_phase_rad",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "min_ecc",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_ecc",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "min_periastron_rad",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_periastron_rad",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "coverage",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "mismatch",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

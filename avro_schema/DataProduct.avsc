@@ -1,0 +1,119 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "DataProduct",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "beam_id",
+      "type": "int"
+    },
+    {
+      "name": "file_type_id",
+      "type": "int"
+    },
+    {
+      "name": "filename",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filepath",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filehash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "available",
+      "type": ["null", "boolean"],
+      "default": null
+    },
+    {
+      "name": "upload_date",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "modification_date",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "metainfo",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "locked",
+      "type": ["null", "boolean"],
+      "default": null
+    },
+    {
+      "name": "utc_start",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tsamp",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tobs",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "nsamples",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "freq_start_mhz",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "freq_end_mhz",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "created_by_processing_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "hardware_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "tstart",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "fft_size",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "nbits",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "nchans",
+      "type": ["null", "int"],
+      "default": null
+    }
+  ]
+}

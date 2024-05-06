@@ -1,0 +1,21 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "ProcessingDpInputs",
+  "fields": [
+    {
+      "name": "id",
+      "type": "bytes"
+    },
+    {
+      "name": "dp_id",
+      "type": ["null", "bytes"],
+      "default": null
+    },
+    {
+      "name": "processing_id",
+      "type": ["null", "bytes"],
+      "default": null
+    }
+  ]
+}

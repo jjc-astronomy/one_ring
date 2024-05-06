@@ -1,0 +1,55 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Antenna",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "telescope_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "latitude_degrees",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "longitude_degrees",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "elevation_meters",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "north",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "east",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "up",
+      "type": ["null", "float"],
+      "default": null
+    }
+  ]
+}

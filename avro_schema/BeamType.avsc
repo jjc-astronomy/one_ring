@@ -1,0 +1,20 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "BeamType",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

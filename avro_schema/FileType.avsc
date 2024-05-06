@@ -1,0 +1,28 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "FileType",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "context",
+      "type": {
+        "name": "ContextEnum",
+        "type": "enum",
+        "symbols": ["Antenna", "Beam", "General"]
+      }
+    }
+  ]
+}

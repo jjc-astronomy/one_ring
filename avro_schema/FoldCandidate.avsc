@@ -1,0 +1,79 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "FoldCandidate",
+  "fields": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "pointing_id",
+      "type": "int"
+    },
+    {
+      "name": "beam_id",
+      "type": "int"
+    },
+    {
+      "name": "processing_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "spin_period",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dm",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdot",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdotdot",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "fold_snr",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filename",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filepath",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "search_candidate_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "metadata_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dp_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "candidate_filter_id",
+      "type": ["null", "int"],
+      "default": null
+    }
+  ]
+}

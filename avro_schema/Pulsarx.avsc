@@ -1,0 +1,76 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Pulsarx",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "subbands_number",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "subint_length",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "clfd_q_value",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "fast_nbins",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "slow_nbins",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "rfi_filter",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "threads",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

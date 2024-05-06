@@ -1,0 +1,66 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Target",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "target_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ra",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dec",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "notes",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "project_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "core_radius_arcmin_harris",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "core_radius_arcmin_baumgardt",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "half_mass_radius_arcmin_harris",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "half_mass_radius_arcmin_baumgardt",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "half_light_radius_arcmin_harris",
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "half_light_radius_arcmin_baumgardt",
+      "type": ["null", "float"],
+      "default": null
+    }
+  ]
+}

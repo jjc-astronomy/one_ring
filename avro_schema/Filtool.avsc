@@ -1,0 +1,57 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Filtool",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "rfi_filter",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "telescope_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "threads",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}
+

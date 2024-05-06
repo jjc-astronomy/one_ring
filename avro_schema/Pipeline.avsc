@@ -1,0 +1,35 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Pipeline",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "name",
+      "type": "string"
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "github_repo_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "github_commit_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "github_branch",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

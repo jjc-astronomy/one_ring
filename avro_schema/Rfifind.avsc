@@ -1,0 +1,71 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Rfifind",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "time",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "time_sigma",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "freq_sigma",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "chan_frac",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "int_frac",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ncpus",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

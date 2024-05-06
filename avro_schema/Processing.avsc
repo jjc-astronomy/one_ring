@@ -1,0 +1,104 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Processing",
+  "fields": [
+    {
+      "name": "id",
+      "type": "bytes"
+    },
+    {
+      "name": "pipeline_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "hardware_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "submit_time",
+      "type": ["null", "string"],
+      "logicalType": "timestamp-micros",
+      "default": null
+    },
+    {
+      "name": "start_time",
+      "type": ["null", "string"],
+      "logicalType": "timestamp-micros",
+      "default": null
+    },
+    {
+      "name": "end_time",
+      "type": ["null", "string"],
+      "logicalType": "timestamp-micros",
+      "default": null
+    },
+    {
+      "name": "process_status",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "attempt_number",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "max_attempts",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "peasoup_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "pulsarx_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "prepfold_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "filtool_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "circular_orbit_search_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "elliptical_orbit_search_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "rfifind_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "candidate_filter_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "execution_order",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "program_name",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

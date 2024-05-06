@@ -1,0 +1,101 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "Peasoup",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "acc_start",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "acc_end",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "min_snr",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ram_limit_gb",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "nharmonics",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "ngpus",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "total_cands_limit",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "fft_size",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "dm_file",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "accel_tol",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "birdie_list",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "chan_mask",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_version",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

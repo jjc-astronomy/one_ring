@@ -1,115 +1,75 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 import groovy.json.JsonSlurper
-import java.util.UUID
-
-// Define a function to generate UUID
-def generateUUID() {
-    UUID.randomUUID().toString()
-}
-
-
-
 
 process kafka_filtool {
     label 'filtool'
     container "${params.fold_singularity_image}"
     errorStrategy 'ignore'
+
+    beforeScript """
+    bash ${baseDir}/beforeScript_Processing.sh ${baseDir} ${process_uuid} ${submit_time} ${execution_order} ${params.jsonconfig} ${params.kafka.server} ${params.kafka.schema_registry_url} \${NXF_SCRATCH} ${params.kafka.message_create} ${params.kafka.producer_script}
+    """
+  afterScript """
+    # Determine the current directory and the exit status file path
+    exit_code=\$?
+    echo "exit code is \$exit_code"
+    work_dir=\$(pwd)
+    echo "Work directory in afterScript is \$work_dir"
+    echo "CHDIR is \${NXF_CHDIR}"
+    exit_code_file="\${NXF_CHDIR}/.exitcode"
+    echo "Exit code file is \$exit_code_file"
+    echo "Files in the directory are:" 
+    \$(ls -v \${NXF_CHDIR}/.*)
+
+    # Ensure the exit status file exists and is readable
+    if [[ -f "\$exit_code_file" ]]; then
+        exit_status=\$(cat "\$exit_code_file")
+    else
+        echo "Warning: Exit status file not found."
+        exit_status="Unknown1"
+    fi
+
+    # Log the completion time and exit status
+    end_time=\$(date -u +"%Y-%m-%dT%H:%M:%S")
+    echo "Process ended at \$end_time"
+    echo "Process ended at \$end_time in directory \${work_dir} with status \$exit_status"
+"""
+
     
     input:
-    val(process_uuid) //For the database
-    val(input_dp_id) //List
-    val(input_dp) //List
-    val(pipeline_id)
-    val(hardware_id)
-    val(filtool_id) //Argument ID
-    val(execution_order)
-    val(program_name) //For the database
-    val(output_filename)
-    val(output_file_type_id) //For the database
-    val(beam_id)
-    val(hardware_id)
-
-    output:
-    tuple path(output_filename), env(output_dir), env(tsamp), env(tobs), env(nsamples), env(freq_start_mhz), env(freq_end_mhz), env(tstart), env(tstart_utc), env(foff), env(nchans), env(nbits)
-
-    // path(output_filename)
-    // env(output_dir)
-    // env(tsamp)
-    // env(tobs)
-    // env(nsamples)
-    // env(freq_start_mhz)
-    // env(freq_end_mhz)
-    // env(tstart)
-    // env(tstart_utc) 
+    val(process_uuid)
+    val(submit_time)
+    val execution_order
+    
 
     script:
-
     """
     #!/bin/bash
-    raw_data=\$(ls -v ${input_dp})
+    trap 'echo "Script failed at line \$LINENO with status \$?"; exit 1' ERR
+
+    
+    raw_data=\$(ls -v ${params.raw_data})
     # Get the first file from the input_data string!!
     first_file=\$(echo \${raw_data} | awk '{print \$1}')
     # Extract the file extension from the first file
     file_extension="\$(basename "\${first_file}" | sed 's/.*\\.//')"
 
     if [[ \${file_extension} == "sf" ]]; then
+        
 
-        filtool --psrfits --scloffs -t ${params.filtool.threads} --nbits ${params.filtool.nbits} --mean ${params.filtool.mean} --std ${params.filtool.std} --td ${params.filtool.time_decimation_factor} --fd ${params.filtool.freq_decimation_factor} --telescope ${params.filtool.telescope} -z ${params.filtool.rfi_filter} --cont -o ${params.target}_${params.utc}_${params.beam} -s ${params.target} -f \${raw_data}
-       
+        echo "filtool -psrfits --scloffs -t ${params.filtool.threads} --nbits ${params.filtool.nbits} --mean ${params.filtool.mean} --std ${params.filtool.std} --td ${params.filtool.time_decimation_factor} --fd ${params.filtool.freq_decimation_factor} --telescope ${params.filtool.telescope} -z ${params.filtool.rfi_filter} --cont -o ${params.target}_${params.utc}_${params.beam} -s ${params.target} -f \${raw_data}"
+        exit 2
     else
 
-        filtool -t ${params.filtool.threads} --nbits ${params.filtool.nbits} --mean ${params.filtool.mean} --std ${params.filtool.std} --td ${params.filtool.time_decimation_factor} --fd ${params.filtool.freq_decimation_factor} --telescope ${params.filtool.telescope} -z ${params.filtool.rfi_filter} --cont -o ${params.target}_${params.utc}_${params.beam} -s ${params.target} -f \${raw_data}
+        echo "filtool -t ${params.filtool.threads} --nbits ${params.filtool.nbits} --mean ${params.filtool.mean} --std ${params.filtool.std} --td ${params.filtool.time_decimation_factor} --fd ${params.filtool.freq_decimation_factor} --telescope ${params.filtool.telescope} -z ${params.filtool.rfi_filter} --cont -o ${params.target}_${params.utc}_${params.beam} -s ${params.target} -f \${raw_data}"
     fi
-    output_dir=\$(pwd)
-    # Get the metadata from the output file and store it in the environment variables
-    while IFS='=' read -r key value
-        do
-            declare "\$key=\$value"
-        done < <(python3 ${params.get_metadata} -f ${output_filename})
-
-    #Temporary hard fix because filtool inverts the frequency band incorrectly.
-    filedit -f \${freq_end_mhz} -F \${foff} ${output_filename}
+    sleep 60
+    
     """
     
 }
 
-
-process kafka_peasoup {
-    label 'peasoup'
-    container "${params.search_singularity_image}"
-    // This will only publish the XML files
-    publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/03_SEARCH/", pattern: "**/*.xml", mode: 'copy'
-
-
-
-    input:
-    tuple val(process_uuid), val(input_dp_id), val(input_dp) //List
-    val(pipeline_id)
-    val(hardware_id)
-    val(peasoup_id) //Argument ID
-    val(execution_order)
-    val(program_name) //For the database
-    val(output_filename)
-    val(output_file_type_id) //For the database
-    val(beam_id)
-    val(hardware_id)
-    path(dm_file)
-    
-
-
-    output:
-    path(output_filename) 
-    env(fft_size)
-
-    script:
-    """
-    output_dir=\$(dirname ${output_filename})
-    mkdir -p \${output_dir}
-    fft_size=${params.peasoup.fft_size}
-    peasoup -i ${input_dp} --fft_size \${fft_size} --limit ${params.peasoup.total_cands_limit} -m ${params.peasoup.min_snr} --acc_start ${params.peasoup.acc_start} --acc_end ${params.peasoup.acc_end} --dm_file ${dm_file} --ram_limit_gb ${params.peasoup.ram_limit_gb} -n ${params.peasoup.nh} -t ${params.peasoup.ngpus} -o \${output_dir}
-    """
-}
 
 
 
@@ -287,49 +247,43 @@ process create_and_send_kafka_message_processing {
     """
 
 }
+ 
 
+workflow kafka_workflow{
     
-    
-    
-   
-workflow {
-    // Define the parameters
     def execution_order = 1
-    println "Pipeline ID: ${params.pipeline_id}"
-    println "Hardware ID: ${params.hardware_id}"
-    println "raw data: ${params.raw_data}"
-    println "beam type: ${params.beam_type}"
-    raw_dp_ids = params.data_products.dp_id.join(' ')
-    raw_dp_files = params.data_products.filename.join(' ')
-    //filtool_process_uuid = generateUUID()
-    filtool_output_filename = "${params.target}_${params.utc}_${params.beam}_01.fil"
-    filtool_process_uuid = "d458f965-ce64-46e8-ac26-4f54180f27da"
-
-    println "Filtool Process UUID: ${filtool_process_uuid}"
-    filtool_channel = kafka_filtool(filtool_process_uuid, raw_dp_ids, raw_dp_files, params.pipeline_id, params.hardware_id, params.filtool_id, execution_order, "filtool", filtool_output_filename, params.filtool_output_file_id, params.beam_id, params.hardware_id)
-    
-    filtool_output = filtool_channel.map { item ->
-    def (filtool_cleaned_file,filtool_dir, tsamp, tobs, nsamples, startMHz, endMHz, tstart, tstartUTC, foff, nchans, nbits) = item
-    filtool_cleaned_file_uuid = generateUUID()
-    peasoup_process_uuid = generateUUID()
-
-    return tuple(peasoup_process_uuid, filtool_cleaned_file_uuid, filtool_cleaned_file)
-    
-    }
-    //Start Peasoup
-    execution_order += 1
-    def peasoup_output_filename = "peasoup_results/overview.xml"
-    //Search all DM range files with the rfi cleaned observation.
-    
-    peasoup_channel = kafka_peasoup(filtool_output, params.pipeline_id, params.hardware_id, params.peasoup_id, execution_order, "peasoup", peasoup_output_filename, params.peasoup_output_file_id, params.beam_id, params.hardware_id, params.peasoup.dm_file)
-   
-    
-    // filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
-    // peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
-    // pulsarx_output = pulsarx(peasoup_results, params.pulsarx_fold_template)
-    // prepfold_output = prepfold(peasoup_results)
-
-
-}
   
+   (process_uuid, submit_time, submit_file) = create_and_send_kafka_message_processing("filtool", execution_order, "processing", params.kafka.server, params.kafka.schema_registry_url, params.kafka.schema_file)
+    // process_uuid.view()
+    // submit_time.view()
+    submit_file.view()
+    //println "Process ID: ${process_uuid}"
+   // println "Submit Time: ${submit_time}"
+    kafka_filtool(process_uuid, submit_time, execution_order)
+    
+    //execution_order += 1
+    //uuid_string.view()
+    
+}
+
+
+
+
+ workflow { 
+
+    if (params.use_kafka == 1) {
+        println("Using kafka workflow")
+        kafka_workflow()
+    }
+    else{
+        println "Using normal workflow"
+        // filtool_output = filtool(fil_files_channel, "zdot", "12", params.telescope)
+        // peasoup_results = peasoup(filtool_output, params.dm_file, params.fft_size, params.total_cands_limit, params.min_snr, params.acc_start, params.acc_end, params.ram_limit_gb, params.nh, params.ngpus)
+        // pulsarx_output = pulsarx(peasoup_results, params.pulsarx_fold_template)
+        // prepfold_output = prepfold(peasoup_results)
+
+    }
+
+
+ }
 

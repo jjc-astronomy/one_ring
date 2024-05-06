@@ -1,0 +1,31 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "User",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "username",
+      "type": "string"
+    },
+    {
+      "name": "fullname",
+      "type": "string"
+    },
+    {
+      "name": "email",
+      "type": "string"
+    },
+    {
+      "name": "password_hash",
+      "type": "string"
+    },
+    {
+      "name": "administrator",
+      "type": "boolean"
+    }
+  ]
+}

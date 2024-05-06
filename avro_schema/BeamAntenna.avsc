@@ -1,0 +1,26 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "BeamAntenna",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "antenna_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "beam_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "description",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}
