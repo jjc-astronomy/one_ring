@@ -97,7 +97,7 @@ def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, p
 #         subprocess.check_output(cmd, shell=True)
 
 
-def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, tstart, fast_nbins, slow_nbins, subint_length, nsubband, utc_beam, beam_name, pulsarx_threads, TEMPLATE, cmask=None):
+def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, tstart, fast_nbins, slow_nbins, subint_length, nsubband, utc_beam, beam_name, pulsarx_threads, TEMPLATE, clfd_q_value, rfi_filter, cmask=None):
     cand_dms = df['dm'].values
     cand_accs = df['acc'].values
     cand_period = df['period'].values
@@ -128,8 +128,8 @@ def fold_with_pulsarx(df, input_filenames, tsamp, fft_size, source_name_prefix, 
                 raise Exception("Unable to parse channel mask: {}".format(
                     str(error)))
     
-    script = "psrfold_fil --plotx -v -t {} --candfile {} -n {} {} {} --template {} --clfd 2.0 -L {} -f {} --rfi zdot {}-o {} --srcname {} --pepoch {}".format(
-              pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE, subint_length, input_filenames, zap_string, output_rootname, source_name_prefix, tstart)
+    script = "psrfold_fil --plotx -v -t {} --candfile {} -n {} {} {} --template {} --clfd {} -L {} -f {} --rfi {} {}-o {} --srcname {} --pepoch {}".format(
+              pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE, clfd_q_value, subint_length, input_filenames, rfi_filter, zap_string, output_rootname, source_name_prefix, tstart)
     subprocess.check_output(script, shell=True)
     
 def main():
@@ -143,6 +143,8 @@ def main():
     parser.add_argument('-s', '--slow_nbins', help='Low profile bin limit for fast-spinning pulsars', type=int, default=64)
     parser.add_argument('-sub', '--subint_length', help='Subint length (s). Default is tobs/64', type=int, default=None)
     parser.add_argument('-nsub', '--nsubband', help='Number of subbands', type=int, default=64)
+    parser.add_argument('-clfd', '--clfd_q_value', help='CLFD Q value', type=float, default=2.0)
+    parser.add_argument('-rfi', '--rfi_filter', help='RFI filter value', type=str, default='zdot')
     parser.add_argument('-b', '--beam_name', help='Beam name string', type=str, default='cfbf00000')
     parser.add_argument('-utc', '--utc_beam', help='UTC beam name string', type=str, default='2024-01-01-00:00:00')
     parser.add_argument('-c', '--chan_mask', help='Peasoup Channel mask file to be passed onto pulsarx', type=str, default='')
@@ -195,7 +197,7 @@ def main():
         else:
             subint_length = args.subint_length
 
-        fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, tstart, args.fast_nbins, args.slow_nbins, subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template,  args.chan_mask)
+        fold_with_pulsarx(df, filterbank_file, tsamp, fft_size, source_name_prefix, tstart, args.fast_nbins, args.slow_nbins, subint_length, args.nsubband, args.utc_beam, args.beam_name, args.pulsarx_threads, PulsarX_Template, args.clfd_q_value, args.rfi_filter,  args.chan_mask)
 
 
 

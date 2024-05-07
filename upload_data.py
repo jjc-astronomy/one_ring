@@ -642,7 +642,7 @@ def insert_peasoup(acc_start, acc_end, min_snr, ram_limit_gb, nharmonics, ngpus,
                 return peasoup_id
     
 
-def insert_pulsarx(subbands_number, subint_length, clfd_q_value, fast_period_bins, slow_period_bins, rfi_filter, extra_args, threads, container_image_name, container_image_version, container_type, container_image_id, pipeline_github_commit_hash, execution_order, argument_hash=None, return_id=False):
+def insert_pulsarx(subbands_number, subint_length, clfd_q_value, fast_period_bins, slow_period_bins, rfi_filter, threads, container_image_name, container_image_version, container_type, container_image_id, extra_args=None, argument_hash=None, return_id=False):
     '''
     Insert PulsarX parameters into the pulsarx_params table if it doesn't already exist
     '''
@@ -650,9 +650,7 @@ def insert_pulsarx(subbands_number, subint_length, clfd_q_value, fast_period_bin
     combined_args = f"{subbands_number}{subint_length}{clfd_q_value}{fast_period_bins}{slow_period_bins}{rfi_filter}{extra_args}{threads}"
     # Generate SHA256 hash
     argument_hash = hashlib.sha256(combined_args.encode()).hexdigest()
-    #Get pipeline id to add in execution order table
-    pipeline_id = get_id_from_name("pipeline", pipeline_github_commit_hash, alternate_key='github_commit_hash')
-
+    
     with engine.connect() as conn:
                 
         stmt = (
@@ -711,7 +709,7 @@ def insert_filtool(rfi_filter, telescope_name, threads, container_image, contain
             if return_id:
                 return filtool_id
     
-def insert_prepfold(ncpus, rfifind_mask, extra_args, container_image, container_version, container_type, container_image_id, pipeline_github_commit_hash, execution_order, argument_hash=None, return_id=False):
+def insert_prepfold(ncpus, container_image, container_version, container_type, container_image_id, extra_args=None, rfifind_mask=None, argument_hash=None, return_id=False):
     '''
     Insert Prepfold parameters into the prepfold_params table if it doesn't already exist
     '''
@@ -719,9 +717,7 @@ def insert_prepfold(ncpus, rfifind_mask, extra_args, container_image, container_
     combined_args = f"{ncpus}{extra_args}"
     # Generate SHA256 hash
     argument_hash = hashlib.sha256(combined_args.encode()).hexdigest()
-    #Get pipeline id to add in execution order table
-    pipeline_id = get_id_from_name("pipeline", pipeline_github_commit_hash, alternate_key='github_commit_hash')
-
+    
     with engine.connect() as conn:
                             
         stmt = (
@@ -1500,11 +1496,12 @@ def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs,
                 'program_id': program['program_id'],
                 'output_file_id': program['output_file_id'],
                 'data_products': [
-                    {'dp_id': dp_id, 'filename': filename} for dp_id, filename in program['data_products']
+                    {'dp_id': dp_id, 'filename': filename} for dp_id, filename in program.get('data_products', [])
                 ]
             } for program in programs
         ]
     }
+
     
     with open(output_filename, 'w') as f:
         json.dump(json_data, f, indent=4)
@@ -1514,82 +1511,87 @@ def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs,
 
 def initialize_configs(file_path):
     """
-    Parses the config file and extracts relevant parameters.
+    Parses the config file and extracts all parameters from the nextflow configuration file.
+    It strips the 'params.' prefix from keys if present and keeps all other keys unchanged.
     """
     nextflow_config = parse_nextflow_flat_config_from_file(file_path)
-    params = {
-        'project_name': nextflow_config['params.project'],
-        'pipeline_name': nextflow_config['params.pipeline_name'],
-        'telescope_name': nextflow_config['params.telescope'],
-        'target_name': nextflow_config['params.target'],
-        'beam_name': nextflow_config['params.beam'],
-        'beam_type': nextflow_config['params.beam_type'],
-        'is_coherent_flag': nextflow_config['params.is_beam_coherent'],
-        'data_header': nextflow_config['params.obs_header'],
-        'raw_data': nextflow_config['params.raw_data'],
-        'hardware_name': nextflow_config['params.hardware']
-    }
+    # Create a new dictionary, adjusting keys to remove the 'params.' prefix where applicable,
+    # but include all entries regardless of prefix
+    params = {key.replace('params.', '') if key.startswith('params.') else key: value 
+              for key, value in nextflow_config.items()}
     return params
+
+
 
 def insert_basic_records(params):
     """
     Inserts basic records into the database and returns their IDs.
     """
-    project_id = insert_project_name(params['project_name'], return_id=True)
-    telescope_id = insert_telescope_name(params['telescope_name'], return_id=True)
-    hardware_id = insert_hardware(params['hardware_name'], return_id=True)
+    project_id = insert_project_name(params['project'], return_id=True)
+    telescope_id = insert_telescope_name(params['telescope'], return_id=True)
+    hardware_id = insert_hardware(params['hardware'], return_id=True)
     return project_id, telescope_id, hardware_id
 
-def setup_programs(telescope_name, docker_image_hashes):
+def prepare_program_parameters(params, docker_image_hashes):
     """
-    Setup program configurations.
+    Prepares program configurations for filtool and peasoup based on the provided configuration.
     """
     filtool = {
         'program_name': 'filtool',
-        'rfi_filter': nextflow_config['params.filtool.rfi_filter'],
-        'threads': nextflow_config['params.filtool.threads'],
-        'image_name': os.path.basename(nextflow_config['params.fold_singularity_image']),
+        'rfi_filter': params['filtool.rfi_filter'],
+        'threads': params['filtool.threads'],
+        'telescope': params['filtool.telescope'],
+        'image_name': os.path.basename(params['fold_singularity_image']),
         'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0],
         'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0],
         'container_type': "singularity"
     }
     peasoup = {
         'program_name': 'peasoup',
-        'acc_start': nextflow_config['params.peasoup.acc_start'],
-        'acc_end': nextflow_config['params.peasoup.acc_end'],
-        'min_snr': nextflow_config['params.peasoup.min_snr'],
-        'ram_limit_gb': nextflow_config['params.peasoup.ram_limit_gb'],
-        'nh': nextflow_config['params.peasoup.nh'],
-        'ngpus': nextflow_config['params.peasoup.ngpus'],
-        'total_cands_limit': nextflow_config['params.peasoup.total_cands_limit'],
-        'fft_size': nextflow_config['params.peasoup.fft_size'],
-        'dm_file': nextflow_config['params.peasoup.dm_file'],
-        'image_name': os.path.basename(nextflow_config['params.search_singularity_image']),
+        'acc_start': params['peasoup.acc_start'],
+        'acc_end': params['peasoup.acc_end'],
+        'min_snr': params['peasoup.min_snr'],
+        'ram_limit_gb': params['peasoup.ram_limit_gb'],
+        'nh': params['peasoup.nh'],
+        'ngpus': params['peasoup.ngpus'],
+        'total_cands_limit': params['peasoup.total_cands_limit'],
+        'fft_size': params['peasoup.fft_size'],
+        'dm_file': params['peasoup.dm_file'],
+        'image_name': os.path.basename(params['search_singularity_image']),
         'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'SHA256'].values[0],
         'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'Version'].values[0],
         'container_type': "singularity"
     }
-    return filtool, peasoup
 
-
-def parse_config_and_initialize(file_path):
-    """
-    Parses configuration file and extracts parameters.
-    """
-    nextflow_config = parse_nextflow_flat_config_from_file(file_path)
-    config = {
-        'project_name': nextflow_config['params.project'],
-        'pipeline_name': nextflow_config['params.pipeline_name'],
-        'telescope_name': nextflow_config['params.telescope'],
-        'target_name': nextflow_config['params.target'],
-        'beam_name': nextflow_config['params.beam'],
-        'beam_type': nextflow_config['params.beam_type'],
-        'is_coherent_flag': nextflow_config['params.is_beam_coherent'],
-        'data_header': nextflow_config['params.obs_header'],
-        'raw_data': nextflow_config['params.raw_data'],
-        'hardware_name': nextflow_config['params.hardware']
+    pulsarx = {
+        'program_name': 'pulsarx',
+        'subint_length': params['pulsarx.subint_length'],
+        'clfd_q_value': params['pulsarx.clfd_q_value'],
+        'rfi_filter': params['pulsarx.rfi_filter'],
+        'fast_nbins': params['pulsarx.fast_nbins'],
+        'slow_nbins': params['pulsarx.slow_nbins'],
+        'nsubband': params['pulsarx.nsubband'],
+        'fold_template': params['pulsarx.fold_template'],
+        'threads': params['pulsarx.threads'],
+        'image_name': os.path.basename(params['fold_singularity_image']),
+        'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0],
+        'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0],
+        'container_type': "singularity"
     }
-    return config
+
+    prepfold = {
+        'program_name': 'prepfold',
+        'ncpus': params['prepfold.ncpus'],
+        'mask': params['prepfold.mask'],
+        'image_name': os.path.basename(params['presto_singularity_image']),
+        'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsar-miner', 'SHA256'].values[0],
+        'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsar-miner', 'Version'].values[0],
+        'container_type': "singularity"
+    }
+    return filtool, peasoup, pulsarx, prepfold
+
+
+
 
 def extract_observation_details(data_header):
     """
@@ -1612,11 +1614,11 @@ def insert_observational_records(params, obs_details, project_id, telescope_id):
     """
     Inserts observational records into the database and returns their IDs. This is survey dependent and needs to be modified for other surveys.
     """
-    target_id = insert_target_name(params['target_name'], obs_details['ra'], obs_details['dec'], project_id, return_id=True)
+    target_id = insert_target_name(params['target'], obs_details['ra'], obs_details['dec'], project_id, return_id=True)
     data = glob.glob(params['raw_data'])
     tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
 
-    if params['telescope_name'].lower() == "meerkat":
+    if params['telescope'].lower() == "meerkat":
         freq_band = get_meerkat_freq_band(obs_details['central_freq'])
     else:
         freq_band = "UNKNOWN"
@@ -1635,12 +1637,12 @@ def insert_observational_records(params, obs_details, project_id, telescope_id):
         return_id=True
     )
     beam_type_id = insert_beam_type(params['beam_type'], return_id=True)
-    beam_id = insert_beam(params['beam_name'], obs_details['ra'], obs_details['dec'], pointing_id, beam_type_id, obs_details['tsamp'], is_coherent=params['is_coherent_flag'], return_id=True)
+    beam_id = insert_beam(params['beam'], obs_details['ra'], obs_details['dec'], pointing_id, beam_type_id, obs_details['tsamp'], is_coherent=params['is_beam_coherent'], return_id=True)
     #Get file extension name and remove dot
     file_type_extension = os.path.splitext(data[0])[1][1:]  
     file_type_id = insert_file_type(file_type_extension, return_id=True)
 
-    return target_id, pointing_id, beam_id, beam_type_id, file_type_id
+    return target_id, pointing_id, beam_id, beam_type_id, file_type_id, tobs
 
 def setup_programs(config, docker_image_hashes):
     """
@@ -1657,7 +1659,16 @@ def setup_programs(config, docker_image_hashes):
             'program_name': 'peasoup',
             'program_id': config['peasoup_id'],
             'output_file_id': config['peasoup_output_file_type_id'],
-            'data_products': config['raw_data_with_id']
+        },
+        {
+            'program_name': 'pulsarx',
+            'program_id': config['pulsarx_id'],
+            'output_file_id': config['pulsarx_output_file_type_id'],
+        },
+        {
+            'program_name': 'prepfold',
+            'program_id': config['prepfold_id'],
+            'output_file_id': config['prepfold_output_file_type_id'],
         }
     ]
 
@@ -1695,11 +1706,11 @@ def main():
     #Run this first before upload_data.py
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
-    params = parse_config_and_initialize(file_path)
+    params = initialize_configs(file_path)
     project_id, telescope_id, hardware_id = insert_basic_records(params)
-    obs_details = extract_observation_details(params['data_header'])
-    print(params)
-    print(obs_details)
+    obs_details = extract_observation_details(params['obs_header'])
+   
+    
   
 
     # Retrieve repo and other metadata
@@ -1708,9 +1719,9 @@ def main():
     
    
     # Insert target and pointing data
-    target_id, pointing_id, beam_id, beam_type_id, file_type_id = insert_observational_records(params, obs_details, project_id, telescope_id)
+    target_id, pointing_id, beam_id, beam_type_id, file_type_id, tobs = insert_observational_records(params, obs_details, project_id, telescope_id)
 
-    
+   
     
     # Get additional metadata for files and types
     data_products = get_metadata_of_all_files(sorted(glob.glob(params['raw_data'])))
@@ -1718,19 +1729,62 @@ def main():
 
     # Data product insertion
     raw_data_with_id = insert_data_products(data_products, beam_id, file_type_id, hardware_id)
-    print(raw_data_with_id)
-    sys.exit()
+  
     
     # Read docker image hashes
     docker_image_hashes = pd.read_csv('docker_image_digests.csv')
+
+    # Prepare program parameters
+    filtool_params, peasoup_params, pulsarx_params, prepfold_params = prepare_program_parameters(params, docker_image_hashes)
+   
+    # Insert program details into the database and retrieve IDs (assuming these functions exist)
+    filtool_id = insert_filtool(filtool_params['rfi_filter'], filtool_params['telescope'], filtool_params['threads'], filtool_params['image_name'], filtool_params['version'], filtool_params['container_type'], filtool_params['hash'], return_id=True)
+    output_file_type_name = ['fil']
+    filtool_output_file_type_id = []
+    for file_type in output_file_type_name:
+        filtool_file_type_id = insert_file_type(file_type, return_id=True)
+        filtool_output_file_type_id.append(filtool_file_type_id)
+    
+    peasoup_id = insert_peasoup(peasoup_params['acc_start'], peasoup_params['acc_end'], peasoup_params['min_snr'], peasoup_params['ram_limit_gb'], peasoup_params['nh'], peasoup_params['ngpus'], peasoup_params['total_cands_limit'], peasoup_params['fft_size'], peasoup_params['dm_file'], peasoup_params['image_name'], peasoup_params['version'], peasoup_params['container_type'], peasoup_params['hash'], return_id=True)
+    output_file_type_name = ['xml']
+    peasoup_output_file_type_id = []
+    for file_type in output_file_type_name:
+        peasoup_file_type_id = insert_file_type(file_type, return_id=True)
+        peasoup_output_file_type_id.append(peasoup_file_type_id)
+    
+    if pulsarx_params['subint_length'] == 'null':
+        pulsarx_params['subint_length'] = tobs/64
+    pulsarx_id = insert_pulsarx(pulsarx_params['nsubband'], pulsarx_params['subint_length'], pulsarx_params['clfd_q_value'], pulsarx_params['fast_nbins'], pulsarx_params['slow_nbins'], pulsarx_params['rfi_filter'], pulsarx_params['threads'], pulsarx_params['image_name'], pulsarx_params['version'], pulsarx_params['container_type'], pulsarx_params['hash'], return_id=True)
+    output_file_type_name = ['ar', 'png']
+    pulsarx_output_file_type_id = []
+    for file_type in output_file_type_name:
+        pulsarx_file_type_id = insert_file_type(file_type, return_id=True)
+        pulsarx_output_file_type_id.append(pulsarx_file_type_id)
+
+    if prepfold_params['mask'] == 'null':
+        prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], return_id=True)
+    else:
+        prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], rfifind_mask = prepfold_params['rfifind_mask'], return_id=True)
+
+    output_file_type_name = ['pfd', 'bestprof', 'ps', 'png']
+    prepfold_output_file_type_id = []
+    for file_type in output_file_type_name:
+        prepfold_file_type_id = insert_file_type(file_type, return_id=True)
+        prepfold_output_file_type_id.append(prepfold_file_type_id)
+    
     programs_config = setup_programs({
-        'filtool_id': 100,  # Example ID
-        'peasoup_id': 101,  # Example ID
-        'filtool_output_file_type_id': 200,  # Example output file type ID
-        'peasoup_output_file_type_id': 201,  # Example output file type ID
+        'filtool_id': filtool_id,  
+        'peasoup_id': peasoup_id,  
+        'pulsarx_id': pulsarx_id,  
+        'prepfold_id': prepfold_id,
+        'filtool_output_file_type_id': filtool_output_file_type_id,  
+        'peasoup_output_file_type_id': peasoup_output_file_type_id,  
+        'pulsarx_output_file_type_id': pulsarx_output_file_type_id,
+        'prepfold_output_file_type_id': prepfold_output_file_type_id,
         'raw_data_with_id': raw_data_with_id
     }, docker_image_hashes)
-
+    
+   
     # Dump JSON with the updated function that handles multiple programs
     dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs_config)
 
@@ -1739,116 +1793,4 @@ if __name__ == "__main__":
 
 
 
-
-# def main():
-#     #Run this first before upload_data.py
-#     #nextflow config -profile nt -flat -sort > data_config.cfg
-    
-    
-#     file_path = 'data_config.cfg'
-#     nextflow_config = parse_nextflow_flat_config_from_file(file_path)
-    
-#     project_name = nextflow_config['params.project']
-#     pipeline_name = nextflow_config['params.pipeline_name']
-#     telescope_name = nextflow_config['params.telescope']
-#     target_name = nextflow_config['params.target']
-#     beam_name = nextflow_config['params.beam']
-#     beam_type = nextflow_config['params.beam_type']
-#     is_coherent_flag = nextflow_config['params.is_beam_coherent']
-#     data_header = nextflow_config['params.obs_header']
-#     raw_data = nextflow_config['params.raw_data']
-#     hardware_name = nextflow_config['params.hardware']
-#     repo_name, branch_name, last_commit_id = get_repo_details()
-#     project_id = insert_project_name(project_name, return_id=True)
-#     telescope_id = insert_telescope_name(telescope_name, return_id=True)
-#     obs_header = parse_meertime_obs_header(data_header)
-#     ra = obs_header['TIED_BEAM_RA']
-#     dec = obs_header['TIED_BEAM_DEC']
-#     utc_start_str = obs_header['UTC_START']
-#     antenna_list = obs_header['ANTENNAE']
-#     utc_start = parse_and_format_datetime(utc_start_str)
-#     nchans = obs_header['SEARCH_OUTNCHAN']
-#     tsamp = float(obs_header['SEARCH_OUTTSAMP']) * 1e-6
-#     central_freq = round(float(obs_header['FREQ']), 2)
-#     receiver = obs_header['RECEIVER'] CHECKED!
-#     data = sorted(glob.glob(raw_data))
-#     dp_metadata = get_metadata_of_all_files(data)
-#     tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
-#     if telescope_name.lower() == "meerkat":
-#         freq_band = get_meerkat_freq_band(central_freq)
-#     else:
-#         freq_band = "UNKNOWN"
-    
-
-#     docker_image_hashes = pd.read_csv('docker_image_digests.csv')
-   
-#     target_id = insert_target_name(target_name, ra, dec, project_id, return_id=True)
-#     pointing_id = insert_pointing(utc_start, tobs, nchans, freq_band, target_id, lowest_freq, highest_freq, tsamp, telescope_id, receiver, return_id=True)
-#     beam_type_id = insert_beam_type(beam_type, return_id=True)
-#     beam_id = insert_beam(beam_name, ra, dec, pointing_id, beam_type_id, tsamp, is_coherent=is_coherent_flag, return_id=True)
-#     hardware_id = insert_hardware(hardware_name, return_id=True)
-#     #get extension of first file
-#     file_type_extension = os.path.splitext(data[0])[1][1:]
-#     file_type_id = insert_file_type(file_type_extension, return_id=True)
-
-
-    
-#     data_available_flag = 1
-#     file_locked_flag = 0
-    
-    
-#     #Add all data_products to the database
-#     raw_data_with_id = []
-#     for dp in dp_metadata:
-#        dp_id = insert_data_product(beam_id, file_type_id, dp['filename'], dp['filepath'], data_available_flag, file_locked_flag, dp['tstart_utc'], dp['tsamp'], dp['tobs'], dp['nsamples'], dp['freq_start_mhz'], dp['freq_end_mhz'], hardware_id, dp['nchans'], dp['nbits'], tstart = dp['tstart'], return_id=True)
-#        raw_data_with_id.append([dp_id, dp['filepath'] + '/' + dp['filename']])
-    
-
-#     pipeline_id = insert_pipeline(pipeline_name, repo_name, last_commit_id, branch_name, description='Time Domain Full length Accel Search using Peasoup', return_id=True)
-#     #Filtool parameters
-#     filtool_rfi_filter = nextflow_config['params.filtool.rfi_filter']
-#     filtool_threads = nextflow_config['params.filtool.threads']
-#     filtool_output_filename = f'{target_name}_{freq_band}_{utc_start}_{beam_name}'
-#     filtool_source_name = target_name
-#     filtool_image_name = os.path.basename(nextflow_config['params.fold_singularity_image'])
-#     filtool_extra_args = None
-#     filtool_hash = docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0]
-#     filtool_version = docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0]
-#     container_type = "singularity"
-#     filtool_id = insert_filtool(filtool_rfi_filter, telescope_name, filtool_threads, filtool_image_name, filtool_version, container_type, filtool_hash, return_id=True, extra_args=filtool_extra_args)
-#     first_program = 'filtool'
-#     output_file_type_name = 'fil'
-#     filtool_output_file_type_id = insert_file_type(output_file_type_name, return_id=True)
-    
-#     #Peasoup parameters
-#     peasoup_acc_start = nextflow_config['params.peasoup.acc_start']
-#     peasoup_acc_end = nextflow_config['params.peasoup.acc_end']
-#     peasoup_min_snr = nextflow_config['params.peasoup.min_snr']
-#     peasoup_ram_limit_gb = nextflow_config['params.peasoup.ram_limit_gb']
-#     peasoup_nh = nextflow_config['params.peasoup.nh']
-#     peasoup_ngpus = nextflow_config['params.peasoup.ngpus']
-#     peasoup_total_cands_limit = nextflow_config['params.peasoup.total_cands_limit']
-#     peasoup_fft_size = nextflow_config['params.peasoup.fft_size']
-#     peasoup_dm_file = nextflow_config['params.peasoup.dm_file']
-#     peasoup_image_name = os.path.basename(nextflow_config['params.search_singularity_image'])
-#     peasoup_extra_args = None
-#     peasoup_hash = docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'SHA256'].values[0]
-#     peasoup_version = docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'Version'].values[0]
-    
-#     peasoup_accel_tol = nextflow_config['params.peasoup.accel_tol']
-#     peasoup_birdie_list = nextflow_config['params.peasoup.birdie_list']
-#     peasoup_chan_mask = nextflow_config['params.peasoup.chan_mask']
-#     print(peasoup_birdie_list, peasoup_chan_mask)
-#     peasoup_id = insert_peasoup(peasoup_acc_start, peasoup_acc_end, peasoup_min_snr, peasoup_ram_limit_gb, \
-#                                 peasoup_nh, peasoup_ngpus, peasoup_total_cands_limit, peasoup_fft_size, \
-#                                 peasoup_dm_file, peasoup_image_name, peasoup_version, container_type, \
-#                                 peasoup_hash, peasoup_accel_tol, return_id=True) 
-    
-#     output_file_type_name = 'xml'
-#     peasoup_output_file_type_id = insert_file_type(output_file_type_name, return_id=True)
-
-
-#     dump_program_data_products_json(pipeline_id, hardware_id, beam_id, first_program, filtool_id, filtool_output_file_type_id, raw_data_with_id)
-   
-    
 

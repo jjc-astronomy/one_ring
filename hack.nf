@@ -33,7 +33,15 @@ process kafka_filtool {
     output:
     tuple path(output_filename), env(output_dir), env(tsamp), env(tobs), env(nsamples), env(freq_start_mhz), env(freq_end_mhz), env(tstart), env(tstart_utc), env(foff), env(nchans), env(nbits)
 
-
+    // path(output_filename)
+    // env(output_dir)
+    // env(tsamp)
+    // env(tobs)
+    // env(nsamples)
+    // env(freq_start_mhz)
+    // env(freq_end_mhz)
+    // env(tstart)
+    // env(tstart_utc) 
 
     script:
 
@@ -61,11 +69,6 @@ process kafka_filtool {
         done < <(python3 ${params.get_metadata} -f ${output_filename})
 
     #Temporary hard fix because filtool inverts the frequency band incorrectly.
-    if [[ \${foff} -ge 0 ]]; then
-        # Make foff negative 
-        \${foff}=-\${foff}
-    fi
-
     filedit -f \${freq_end_mhz} -F \${foff} ${output_filename}
     """
     
@@ -76,7 +79,7 @@ process kafka_peasoup {
     label 'peasoup'
     container "${params.search_singularity_image}"
     // This will only publish the XML files
-    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/01_SEARCH/", pattern: "**/*.xml", mode: 'copy'
+    publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/03_SEARCH/", pattern: "**/*.xml", mode: 'copy'
 
 
 
@@ -96,7 +99,8 @@ process kafka_peasoup {
 
 
     output:
-    tuple path(output_filename), env(fft_size)
+    path(output_filename) 
+    env(fft_size)
 
     script:
     """
@@ -108,62 +112,7 @@ process kafka_peasoup {
 }
 
 
-process kafka_pulsarx {
-    label 'pulsarx'
-    container "${params.fold_singularity_image}"
-    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/02_FOLDING/", pattern: "*.{ar,png}", mode: 'copy'
 
-
-
-    input:
-    tuple val(process_uuid), val(input_dp_id), val(input_dp) //List
-    path (pulsarx_fold_template)
-    val(pulsarx_id)
-    val(output_file_type_id)
-    val(execution_order)
-  
-
-    output:
-    tuple env(output_archives), env(output_plots), path("*.ar"), path("*.png")
-
-    script:
-    """
-    #!/bin/bash
-    python3 ${params.folding.fold_script} -i ${input_dp} -t pulsarx -p ${pulsarx_fold_template} -b ${params.beam} -threads ${params.pulsarx.threads} -utc ${params.utc} -rfi ${params.pulsarx.rfi_filter} -clfd ${params.pulsarx.clfd_q_value}
-    output_archives=\$(ls -v *.ar)
-    output_plots=\$(ls -v *.png)
-    """
-
-}
-
-process kafka_prepfold {
-    label 'prepfold'
-    container "${params.presto_singularity_image}"
-    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/03_FOLDING/", pattern: "*.pfd*", mode: 'copy'
-
-    input:
-    tuple val(process_uuid), val(input_dp_id), val(input_dp) //List
-    val(prepfold_id)
-    val(output_file_type_id)
-    val(execution_order)
-
-    output:
-    tuple env(pfds), env(bestprofs), env(ps), env(pngs), path("*.pfd*")
-    
-
-    script:
-    """
-    #!/bin/bash
-    python ${params.folding.fold_script} -i ${input_dp} -t presto -b ${params.beam} -pthreads ${params.prepfold.ncpus}
-    pfds=\$(ls -v *.pfd)
-    bestprofs=\$(ls -v *.bestprof)
-    ps=\$(ls -v *.ps)
-    pngs=\$(ls -v *.png)
-    """
-
-
-
-}
 
 process filtool {
     label 'filtool'
@@ -339,70 +288,34 @@ process create_and_send_kafka_message_processing {
 
 }
 
+    
+    
+    
    
 workflow {
     // Define the parameters
     def execution_order = 1
-    def filtool_id, filtool_output_file_id, peasoup_id, peasoup_output_file_id, pulsarx_id, pulsarx_output_file_id, prepfold_id, prepfold_output_file_id
-    
-    //Extract all the database IDs for each program from the JSON file
+    def filtool_id, filtool_output_file_id, peasoup_id, peasoup_output_file_id
+
+    println "Pipeline ID: ${params.pipeline_id}"
+    println "Hardware ID: ${params.hardware_id}"
+    println "Beam ID: ${params.beam_id}"
+    println "Programs: ${params.programs.program_name}"
+    // Iterate over the list of programs
     params.programs.each { program ->
         if (program.program_name == 'filtool') {
             filtool_id = program.program_id
             filtool_output_file_id = program.output_file_id
-            filtool_input_dp_ids = program.data_products.dp_id.join(' ')
-            filtool_input_dp_files = program.data_products.filename.join(' ')
-
         } else if (program.program_name == 'peasoup') {
             peasoup_id = program.program_id
             peasoup_output_file_id = program.output_file_id
         }
-          else if (program.program_name == 'pulsarx'){
-            pulsarx_id = program.program_id
-            pulsarx_output_file_id = program.output_file_id
-          }
-          else if (program.program_name == 'prepfold'){
-            prepfold_id = program.program_id
-            prepfold_output_file_id = program.output_file_id
-          }
     }
+    println "Filtool ID: $filtool_id"
+    println "Filtool Output File ID: $filtool_output_file_id"
+    println "Peasoup ID: $peasoup_id"
+    println "Peasoup Output File ID: $peasoup_output_file_id"
    
-    
-    filtool_output_filename = "${params.target}_${params.utc}_${params.beam}_01.fil"
-    filtool_process_uuid = generateUUID()
-
-    filtool_channel = kafka_filtool(filtool_process_uuid, filtool_input_dp_ids, filtool_input_dp_files, params.pipeline_id, params.hardware_id, filtool_id, execution_order, "filtool", filtool_output_filename, filtool_output_file_id, params.beam_id, params.hardware_id)
-    
-    filtool_output = filtool_channel.map { item ->
-        def (filtool_cleaned_file,filtool_dir, tsamp, tobs, nsamples, startMHz, endMHz, tstart, tstartUTC, foff, nchans, nbits) = item
-        filtool_cleaned_file_uuid = generateUUID()
-        peasoup_process_uuid = generateUUID()
-        return tuple(peasoup_process_uuid, filtool_cleaned_file_uuid, filtool_cleaned_file)
-    }
-    //Start Peasoup
-    execution_order += 1
-    def peasoup_output_filename = "peasoup_results/overview.xml"
-    //Search all DM range files with the rfi cleaned observation.
-    
-    peasoup_channel = kafka_peasoup(filtool_output, params.pipeline_id, params.hardware_id, peasoup_id, execution_order, "peasoup", peasoup_output_filename, peasoup_output_file_id, params.beam_id, params.hardware_id, params.peasoup.dm_file)
-
-    peasoup_results = peasoup_channel.multiMap { item ->
-        def (peasoup_output_file, fft_size) = item
-        def peasoup_output_file_uuid = generateUUID()
-        def pulsarx_process_uuid = generateUUID()
-        def prepfold_process_uuid = generateUUID()
-
-        pulsarx: tuple(pulsarx_process_uuid, peasoup_output_file_uuid, peasoup_output_file) // Tuple for PulsarX
-        prepfold: tuple(prepfold_process_uuid, peasoup_output_file_uuid, peasoup_output_file) // Tuple for Prepfold
-    }
-    //Start PulsarX
-    execution_order += 1
-    pulsarx_output = kafka_pulsarx(peasoup_results.pulsarx, params.pulsarx.fold_template, pulsarx_id, pulsarx_output_file_id, execution_order)
-    //Start Prepfold
-    prepfold_output = kafka_prepfold(peasoup_results.prepfold, prepfold_id, prepfold_output_file_id, execution_order)
-
-
-
 
 }
   
