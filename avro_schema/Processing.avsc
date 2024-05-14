@@ -20,19 +20,16 @@
     {
       "name": "submit_time",
       "type": ["null", "string"],
-      "logicalType": "timestamp-micros",
       "default": null
     },
     {
       "name": "start_time",
       "type": ["null", "string"],
-      "logicalType": "timestamp-micros",
       "default": null
     },
     {
       "name": "end_time",
       "type": ["null", "string"],
-      "logicalType": "timestamp-micros",
       "default": null
     },
     {

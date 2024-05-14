@@ -11,4 +11,4 @@ Thoughts.txt
 .env
 __pycache__
 kafka_env/
-
+semi_coherent_searches.py

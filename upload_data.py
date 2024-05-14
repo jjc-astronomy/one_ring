@@ -1706,6 +1706,11 @@ def main():
     #Run this first before upload_data.py
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
+    delete_all_rows("processing")
+    reset_primary_key_counter("processing")
+    delete_all_rows("processing_dp_inputs")
+    reset_primary_key_counter("processing_dp_inputs")
+    sys.exit()
     params = initialize_configs(file_path)
     project_id, telescope_id, hardware_id = insert_basic_records(params)
     obs_details = extract_observation_details(params['obs_header'])

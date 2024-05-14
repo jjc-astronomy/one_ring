@@ -53,16 +53,30 @@ class KafkaProducer:
     
     @staticmethod
     def convert_row_types(row):
-        int_fields = ['pipeline_id', 'hardware_id', 'filtool_id', 'execution_order', 'attempt_number', 'max_attempts']
+        int_fields = ['pipeline_id', 'hardware_id', 'filtool_id', 'execution_order', 'attempt_number', 'max_attempts', 'peasoup_id', 'prepfold_id', 'pulsarx_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id']
         binary_fields = ['id', 'dp_id', 'processing_id']
-        for field in int_fields:
-            if field in row:
-                row[field] = int(row[field])
 
-        # Convert the 'id' field to binary for DB Insertion
+        # Replace empty strings with None
+        for key, value in row.items():
+            if value == '':
+                row[key] = None
+
+        # Convert fields to integers where applicable
+        for field in int_fields:
+            if field in row and row[field] is not None:
+                try:
+                    row[field] = int(row[field])
+                except ValueError:
+                    raise ValueError(f"Error converting {field} to int. Invalid value: {row[field]}")
+
+        # Convert specified fields to binary format using UUIDs
         for field in binary_fields:
-            if field in row:
-                row[field] = uuid_utils.convert_uuid_string_to_binary(row[field])
+            if field in row and row[field] is not None:
+                try:
+                    row[field] = uuid_utils.convert_uuid_string_to_binary(row[field])
+                except ValueError as e:
+                    raise ValueError(f"Error converting {field} to binary. Invalid UUID: {row[field]}. Error: {str(e)}")
+
         return row
 
 if __name__ == "__main__":
