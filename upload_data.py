@@ -1458,13 +1458,14 @@ def parse_nextflow_flat_config_from_file(file_path):
 
 
 
-def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs, output_filename='raw_dp_with_ids.json'):
+def dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_id, programs, output_filename='raw_dp_with_ids.json'):
     """
     Generates a JSON file organizing data products for multiple programs along with pipeline and hardware id.
     
     Parameters:
     - pipeline_id (int): The unique identifier for the pipeline.
     - hardware_id (int): The unique identifier for the hardware.
+    - pointing_id (int): The unique identifier for the pointing.
     - beam_id (int): The unique identifier for the beam.
     - programs (list of dicts): List of program configurations. Each dictionary should have:
         - program_name (str): The name of the program (e.g., "filtool", "peasoup").
@@ -1477,6 +1478,7 @@ def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs,
     {
         "pipeline_id": <pipeline_id>,
         "hardware_id": <hardware_id>,
+        "pointing_id": <pointing_id>,
         "beam_id": <beam_id>,
         "programs": [
             {
@@ -1493,7 +1495,7 @@ def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs,
     }
     
     Example Usage:
-    dump_program_data_products_json(1, 2, 3, [
+    dump_program_data_products_json(1, 2, 3, 4 [
         {"program_name": "filtool", "program_id": 100, "output_file_id": 200, "data_products": [("dp1", "file1.fil"), ("dp2", "file2.fil")]},
         {"program_name": "peasoup", "program_id": 101, "output_file_id": 201, "data_products": [("dp3", "file3.ps"), ("dp4", "file4.ps")]}
     ])
@@ -1720,6 +1722,8 @@ def main():
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
     #table_to_csv("file_type", "file_type.csv")
+    delete_all_rows("search_candidate")
+    reset_primary_key_counter("search_candidate")
     delete_all_rows("processing")
     reset_primary_key_counter("processing")
     delete_all_rows("processing_dp_inputs")
@@ -1761,19 +1765,9 @@ def main():
    
     # Insert program details into the database and retrieve IDs (assuming these functions exist)
     filtool_id = insert_filtool(filtool_params['rfi_filter'], filtool_params['telescope'], filtool_params['threads'], filtool_params['image_name'], filtool_params['version'], filtool_params['container_type'], filtool_params['hash'], return_id=True)
-    # output_file_type_name = ['fil']
-    # filtool_output_file_type_id = []
-    # for file_type in output_file_type_name:
-    #     filtool_file_type_id = insert_file_type(file_type, return_id=True)
-    #     filtool_output_file_type_id.append(filtool_file_type_id)
     
     peasoup_id = insert_peasoup(peasoup_params['acc_start'], peasoup_params['acc_end'], peasoup_params['min_snr'], peasoup_params['ram_limit_gb'], peasoup_params['nh'], peasoup_params['ngpus'], peasoup_params['total_cands_limit'], peasoup_params['fft_size'], peasoup_params['dm_file'], peasoup_params['image_name'], peasoup_params['version'], peasoup_params['container_type'], peasoup_params['hash'], return_id=True)
-    # output_file_type_name = ['xml']
-    # peasoup_output_file_type_id = []
-    # for file_type in output_file_type_name:
-    #     peasoup_file_type_id = insert_file_type(file_type, return_id=True)
-    #     peasoup_output_file_type_id.append(peasoup_file_type_id)
-    
+   
     if pulsarx_params['subint_length'] == 'null':
         pulsarx_params['subint_length'] = tobs/64
     pulsarx_id = insert_pulsarx(pulsarx_params['nsubband'], pulsarx_params['subint_length'], pulsarx_params['clfd_q_value'], pulsarx_params['fast_nbins'], pulsarx_params['slow_nbins'], pulsarx_params['rfi_filter'], pulsarx_params['threads'], pulsarx_params['image_name'], pulsarx_params['version'], pulsarx_params['container_type'], pulsarx_params['hash'], return_id=True)
@@ -1788,27 +1782,18 @@ def main():
     else:
         prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], rfifind_mask = prepfold_params['rfifind_mask'], return_id=True)
 
-    #output_file_type_name = ['pfd', 'bestprof', 'ps', 'png']
-    # prepfold_output_file_type_id = []
-    # for file_type in output_file_type_name:
-    #     prepfold_file_type_id = insert_file_type(file_type, return_id=True)
-    #     prepfold_output_file_type_id.append(prepfold_file_type_id)
-    
+   
     programs_config = setup_programs({
         'filtool_id': filtool_id,  
         'peasoup_id': peasoup_id,  
         'pulsarx_id': pulsarx_id,  
         'prepfold_id': prepfold_id,
-        # 'filtool_output_file_type_id': filtool_output_file_type_id,  
-        # 'peasoup_output_file_type_id': peasoup_output_file_type_id,  
-        # 'pulsarx_output_file_type_id': pulsarx_output_file_type_id,
-        # 'prepfold_output_file_type_id': prepfold_output_file_type_id,
         'raw_data_with_id': raw_data_with_id
     }, docker_image_hashes)
     
    
     # Dump JSON with the updated function that handles multiple programs
-    dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs_config)
+    dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_id, programs_config)
 
 if __name__ == "__main__":
     main()

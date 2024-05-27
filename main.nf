@@ -26,6 +26,7 @@ process kafka_filtool {
     val(execution_order)
     val(program_name) //For the database
     val(output_dp)
+    val(pointing_id)
     val(beam_id)
 
     output:
@@ -88,6 +89,7 @@ process kafka_peasoup {
     val(execution_order)
     val(program_name) //For the database
     val(output_dp)
+    val(pointing_id)
     val(beam_id)
     val(hardware_id)
     path(dm_file)
@@ -117,6 +119,7 @@ process kafka_pulsarx {
     tuple val(process_uuid), val(input_dp_id), val(input_dp) // List
     val(pipeline_id)
     val(hardware_id)
+    val(pointing_id)
     val(beam_id)
     path(pulsarx_fold_template)
     val(pulsarx_id)
@@ -126,7 +129,6 @@ process kafka_pulsarx {
     output:
     //path(*.ar, *.png) are kept for downstream processes, and env (output_archives, outputplots) for the database.
     tuple path("*.ar"), path("*.png"), env(output_dp), env(output_dp_id)
-    //tuple path("*.ar"), path("*.png"), env(output_archives), env(ar_uuids), env(output_plots), env(png_uuids)
 
     script:
     """
@@ -155,6 +157,7 @@ process kafka_prepfold {
     tuple val(process_uuid), val(input_dp_id), val(input_dp) // List
     val(pipeline_id)
     val(hardware_id)
+    val(pointing_id)
     val(beam_id)
     val(prepfold_id)
     val(execution_order)
@@ -360,7 +363,7 @@ process create_and_send_kafka_message_processing {
 workflow {
     // Define the parameters
     def execution_order = 1
-    def filtool_id, filtool_output_file_id, peasoup_id, peasoup_output_file_id, pulsarx_id, pulsarx_output_file_id, prepfold_id, prepfold_output_file_id
+    def filtool_id, peasoup_id, pulsarx_id, prepfold_id
     
     //Extract all the database IDs for each program from the JSON file
     params.programs.each { program ->
@@ -384,7 +387,7 @@ workflow {
     filtool_output_filename = "${params.target}_${params.utc}_${params.beam}_01.fil"
     filtool_process_uuid = generateUUID()
 
-    filtool_channel = kafka_filtool(filtool_process_uuid, filtool_input_dp_ids, filtool_input_dp_files, params.pipeline_id, params.hardware_id, filtool_id, execution_order, "filtool", filtool_output_filename, params.beam_id)
+    filtool_channel = kafka_filtool(filtool_process_uuid, filtool_input_dp_ids, filtool_input_dp_files, params.pipeline_id, params.hardware_id, filtool_id, execution_order, "filtool", filtool_output_filename, params.pointing_id, params.beam_id)
     
     filtool_output = filtool_channel.map { item ->
         def (filtool_cleaned_file, filtool_cleaned_file_uuid, tsamp, tobs, nsamples, startMHz, endMHz, tstart, tstartUTC, foff, nchans, nbits) = item
@@ -397,7 +400,7 @@ workflow {
     def peasoup_output_filename = "peasoup_results/overview.xml"
     //Search all DM range files with the rfi cleaned observation.
     
-    peasoup_channel = kafka_peasoup(filtool_output, params.pipeline_id, params.hardware_id, peasoup_id, execution_order, "peasoup", peasoup_output_filename, params.beam_id, params.hardware_id, params.peasoup.dm_file)
+    peasoup_channel = kafka_peasoup(filtool_output, params.pipeline_id, params.hardware_id, peasoup_id, execution_order, "peasoup", peasoup_output_filename, params.pointing_id, params.beam_id, params.hardware_id, params.peasoup.dm_file)
 
     peasoup_results = peasoup_channel.multiMap { item ->
         def (peasoup_output_file, peasoup_output_file_uuid, fft_size) = item
@@ -410,9 +413,9 @@ workflow {
     }
     //Start PulsarX
     execution_order += 1
-    pulsarx_output = kafka_pulsarx(peasoup_results.pulsarx, params.pipeline_id, params.hardware_id, params.beam_id, params.pulsarx.fold_template, pulsarx_id, execution_order, "pulsarx")
+    pulsarx_output = kafka_pulsarx(peasoup_results.pulsarx, params.pipeline_id, params.hardware_id, params.pointing_id, params.beam_id, params.pulsarx.fold_template, pulsarx_id, execution_order, "pulsarx")
     //Start Prepfold
-    prepfold_output = kafka_prepfold(peasoup_results.prepfold, params.pipeline_id, params.hardware_id, params.beam_id, prepfold_id, execution_order, "prepfold")
+    prepfold_output = kafka_prepfold(peasoup_results.prepfold, params.pipeline_id, params.hardware_id, params.pointing_id, params.beam_id, prepfold_id, execution_order, "prepfold")
 
 
 

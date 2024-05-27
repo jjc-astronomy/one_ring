@@ -5,79 +5,66 @@
   "fields": [
     {
       "name": "id",
-      "type": "string"
-    },
-    {
-      "name": "pointing_id",
-      "type": "int"
-    },
-    {
-      "name": "beam_id",
-      "type": "int"
-    },
-    {
-      "name": "processing_id",
-      "type": ["null", "string"],
-      "default": null
+      "type": "bytes"
     },
     {
       "name": "spin_period",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "dm",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "pdot",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "pdotdot",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "pb",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "x",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "t0",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "omega",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "e",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "snr",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "ddm_count_ratio",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
       "name": "ddm_snr_ratio",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
@@ -112,7 +99,7 @@
     },
     {
       "name": "dp_id",
-      "type": ["null", "string"],
+      "type": ["null", "bytes"],
       "default": null
     },
     {

@@ -16,6 +16,7 @@ import csv
 import pandas as pd
 from typing import List, Optional, Dict
 import traceback
+import xml.etree.ElementTree as ET
 
 
 processing_columns_to_ignore = {'input_dp_id', 'input_dp'}
@@ -72,27 +73,27 @@ class ProcessDataParser:
         self.fields_by_status = {
             'SUBMITTED': {
                 'top_level': ['status', 'attempt', 'submit', 'workdir'],
-                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name', 'input_dp_id'],
+                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'pointing_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name', 'input_dp_id'],
                 'outputs': []
             },
             'RUNNING': {
                 'top_level': ['status', 'attempt', 'submit', 'start', 'workdir'],
-                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
+                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'pointing_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
                 'outputs': []
             },
             'COMPLETED': {
                 'top_level': ['status', 'attempt', 'submit', 'start', 'complete', 'workdir'],
-                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
+                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'pointing_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
                 'outputs': ['output_dp', 'output_dp_id', 'fft_size', 'tsamp', 'tobs', 'nsamples', 'freq_start_mhz', 'freq_end_mhz', 'tstart', 'tstart_utc', 'nchans', 'nbits', 'foff', 'locked', 'filehash', 'metainfo']
             },
             'FAILED': {
                 'top_level': ['status', 'attempt', 'submit', 'start', 'complete', 'workdir'],
-                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
+                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'pointing_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
                 'outputs': []
             },
             'ABORTED': {
                 'top_level': ['status', 'attempt', 'submit', 'start', 'complete', 'workdir'],
-                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
+                'inputs': ['process_uuid', 'pipeline_id', 'hardware_id', 'pointing_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name'],
                 'outputs': []
             }
         }
@@ -309,11 +310,13 @@ class DataProductInputHandler:
 
 class DataProductOutputHandler:
 
-    def __init__(self, kafka_producer, dp_topic: str):
-        self.kafka_producer = kafka_producer
-        self.dp_topic = dp_topic
+    def __init__(self, kafka_producer_dp_output, dp_output_topic: str, kafka_producer_search_candidate, search_cand_topic: str):
+        self.kafka_producer_dp_output = kafka_producer_dp_output
+        self.dp_output_topic = dp_output_topic
+        self.kafka_producer_search_candidate = kafka_producer_search_candidate
+        self.search_cand_topic = search_cand_topic
 
-    column_order = ['id', 'beam_id', 'file_type_id', 'filename', \
+    column_order = ['id', 'pointing_id', 'beam_id', 'file_type_id', 'filename', \
                     'filepath', 'filehash', 'available', 'metainfo', \
                     'locked', 'utc_start', 'tsamp', 'tobs', 'nsamples', \
                     'freq_start_mhz', 'freq_end_mhz',  'created_by_processing_id', \
@@ -367,11 +370,59 @@ class DataProductOutputHandler:
         # Return the filtered data, flattening if the original input was a single dictionary
         return filtered_data if isinstance(data, list) else filtered_data[0]
 
+    
+    def xml_to_kafka_producer(self, xml_file, pointing_id, beam_id, hardware_id, processing_id, dp_id):
+
+        tree = ET.parse(xml_file)
+        root = tree.getroot()
+        header_params = root[1]
+        search_params = root[2]
+        candidates = root[6]
+
+        filterbank_file = str(search_params.find("infilename").text)
+        tsamp = float(header_params.find("tsamp").text)
+        fft_size = int(search_params.find("size").text)
+        nsamples = int(root.find("header_parameters/nsamples").text)
+        tstart = float(header_params.find("tstart").text)
+        source_name_prefix = str(header_params.find("source_name").text).strip()
         
+        ignored_entries = ['candidate', 'opt_period', 'folded_snr', 'byte_offset', 'is_adjacent', 'is_physical']
+        rows = []
+        for candidate in candidates:
+            cand_dict = {}
+            for cand_entry in candidate.iter():
+                if not cand_entry.tag in ignored_entries:
+                    cand_dict[cand_entry.tag] = cand_entry.text
+            cand_dict['cand_id_in_file'] = candidate.attrib.get("id")
+            rows.append(cand_dict)
+
+        df = pd.DataFrame(rows)
+        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int})
+        for index, row in df.iterrows():
+            message = {}
+            message['id'] = uuid_utils.generate_binary_uuid()
+            message['pointing_id'] = pointing_id
+            message['beam_id'] = beam_id
+            message['processing_id'] = processing_id
+            message['spin_period'] = row['period']
+            message['dm'] = row['dm']
+            message['pdot'] = a_to_pdot(row['period'], row['acc'])
+            message['snr'] = row['snr']
+            message['ddm_count_ratio'] = row['ddm_count_ratio']
+            message['ddm_snr_ratio'] = row['ddm_snr_ratio']
+            message['nassoc'] = int(row['nassoc'])
+            message['filename'] = os.path.basename(xml_file)
+            message['filepath'] = os.path.dirname(xml_file)
+            message['nh'] = int(row['nh'])
+            message['dp_id'] = dp_id
+            message['candidate_id_in_file'] = int(row['cand_id_in_file'])
+        
+            self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
 
     def send_data_product_outputs(
         self,
         workdir: str,
+        pointing_id: int,
         beam_id: int,
         filename_list: str,
         output_dp_id_list: str,
@@ -429,22 +480,27 @@ class DataProductOutputHandler:
             message = {k: v for k, v in message.items() if v is not None}
             
             
-            self.kafka_producer.produce_message(self.dp_topic, message)
+            self.kafka_producer_dp_output.produce_message(self.dp_output_topic, message)
+            #If its an xml file, then we need to send the search candidate to the search candidate topic
+            if file_extension == 'xml':
+                self.xml_to_kafka_producer(filename, pointing_id, beam_id, hardware_id, processing_uuid, dp_uuid)
 
 
 class JsonFileProcessor(FileSystemEventHandler):
-    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, processing_topic, dp_input_topic, dp_output_topic, read_existing=False):
+    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, kafka_producer_search_candidate, processing_topic, dp_input_topic, dp_output_topic, search_cand_topic, read_existing=False):
         super().__init__()
         self.directory = directory
         self.kafka_producer_processing = kafka_producer_processing
         self.kafka_producer_dp_input = kafka_producer_dp_input
         self.kafka_producer_dp_output = kafka_producer_dp_output
+        self.kafka_producer_search_candidate = kafka_producer_search_candidate
         self.processing_topic = processing_topic
         self.dp_input_topic = dp_input_topic
         self.dp_output_topic = dp_output_topic
+        self.search_cand_topic = search_cand_topic
         self.read_existing = read_existing
         self.dp_inputs_handler = DataProductInputHandler(kafka_producer_dp_input, dp_input_topic)
-        self.dp_outputs_handler = DataProductOutputHandler(kafka_producer_dp_output, dp_output_topic)
+        self.dp_outputs_handler = DataProductOutputHandler(kafka_producer_dp_output, dp_output_topic, kafka_producer_search_candidate, search_cand_topic)
 
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.json'):
@@ -476,12 +532,14 @@ class JsonFileProcessor(FileSystemEventHandler):
                 input_dp_id = filtered_data_processing_dp_inputs.get('dp_id')
                 processing_id = filtered_data_processing_dp_inputs.get('processing_id')
                 if input_dp_id:
-                    self.dp_inputs_handler.send_data_product_inputs(processing_id, input_dp_id)
+                   self.dp_inputs_handler.send_data_product_inputs(processing_id, input_dp_id)
             
             if item['status'] == 'COMPLETED':
                 filtered_data_dp_outputs = DataProductOutputHandler.filter_and_rename(item)
+               
                 self.dp_outputs_handler.send_data_product_outputs(
                     workdir = filtered_data_dp_outputs['workdir'],
+                    pointing_id = filtered_data_dp_outputs['pointing_id'],
                     beam_id = filtered_data_dp_outputs['beam_id'],
                     filename_list = filtered_data_dp_outputs['filename'],
                     output_dp_id_list = filtered_data_dp_outputs['id'],
@@ -504,63 +562,38 @@ class JsonFileProcessor(FileSystemEventHandler):
 
 
 
+def a_to_pdot(P_s, acc_ms2):
+    LIGHT_SPEED = 2.99792458e8  # Speed of Light in SI
+    return P_s * acc_ms2 /LIGHT_SPEED
 
 
-        # for item in filtered_data:
-        #     item = KafkaProducer.convert_row_types(item) 
-        #     self.kafka_producer_processing.produce_message(self.processing_topic, item)
+
+
+
+
         
-        # # Handle data product input messages when a process is submitted
-        # for item in filtered_data_processing_dp_inputs:
-        #     if item['status'] == 'SUBMITTED':
-        #         input_dp_id = item.get('dp_id')
-        #         processing_id = item.get('processing_id')
-        #         if input_dp_id:
-        #             self.dp_inputs_handler.send_data_product_inputs(processing_id, input_dp_id)
-
-        # # Handle data product output messages when a process is completed
-        # for item in filtered_data_dp_outputs:
-        #     if item['process_status'] == 'COMPLETED':
-        #         self.dp_outputs_handler.send_data_product_outputs(
-        #             beam_id=item['beam_id'],
-        #             filename_list=item['filename'],
-        #             output_dp_id_list=item['id'],
-        #             processing_id=item['created_by_processing_id'],
-        #             hardware_id=item['hardware_id'],
-        #             file_type_table=file_type_lookup_table,
-        #             filehash=item.get('filehash'),
-        #             tsamp=item.get('tsamp'),
-        #             tobs=item.get('tobs'),
-        #             nsamples=item.get('nsamples'),
-        #             freq_start_mhz=item.get('freq_start_mhz'),
-        #             freq_end_mhz=item.get('freq_end_mhz'),
-        #             locked=item.get('locked'),
-        #             metainfo=item.get('metainfo'),
-        #             utc_start=item.get('utc_start'),
-        #             tstart=item.get('tstart'),
-        #             fft_size=item.get('fft_size'),
-        #             foff=item.get('foff')
-        #         )
-              
-
- 
-
 
                
 def main(args):
+
+
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
     kafka_producer_processing = KafkaProducer(args.bootstrap_servers, args.schema_registry_url, args.processing_schema_file)
     kafka_producer_dp_input = KafkaProducer(args.bootstrap_servers, args.schema_registry_url, args.dp_input_schema_file)
     kafka_producer_dp_output = KafkaProducer(args.bootstrap_servers, args.schema_registry_url, args.dp_output_schema_file)
+    kafka_producer_search_candidate = KafkaProducer(args.bootstrap_servers, args.schema_registry_url, args.search_cand_schema_file)
+
     event_handler = JsonFileProcessor(
         directory=args.directory,
         kafka_producer_processing=kafka_producer_processing,
         kafka_producer_dp_input=kafka_producer_dp_input,
         kafka_producer_dp_output=kafka_producer_dp_output,
+        kafka_producer_search_candidate=kafka_producer_search_candidate,
         processing_topic=args.processing_topic,
         dp_input_topic=args.dp_input_topic,
         dp_output_topic=args.dp_output_topic,
+        search_cand_topic=args.search_cand_topic,
         read_existing=args.read_existing
     )
 
@@ -593,8 +626,10 @@ if __name__ == "__main__":
     parser.add_argument("--processing_schema_file", type=str, help="Schema file for the Avro conversion.", required=True)
     parser.add_argument("--dp_input_topic", type=str, help="Kafka topic for processing data product inputs.", required=True)
     parser.add_argument("--dp_output_topic", type=str, help="Kafka topic for processing data product outputs.", required=True)
+    parser.add_argument("--search_cand_topic", type=str, help="Kafka topic for search candidates.", required=True)
     parser.add_argument("--dp_input_schema_file", type=str, help="Schema file for the data product inputs Avro conversion.", required=True)
     parser.add_argument("--dp_output_schema_file", type=str, help="Schema file for the data product outputs Avro conversion.", required=True)
+    parser.add_argument("--search_cand_schema_file", type=str, help="Schema file for search candidates Avro conversion", required=True)
     parser.add_argument("--read_existing", action="store_true", help="Process existing JSON files on startup.")
     args = parser.parse_args()
     
