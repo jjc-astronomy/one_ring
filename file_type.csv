@@ -1,0 +1,18 @@
+id,name,description,context
+1,fil,Filterbank file,General
+2,sf,PSRFITS file,General
+3,fits,FITS file,General
+4,csv,CSV file,General
+5,png,PNG file,General
+6,pdf,PDF file,General
+7,txt,Text file,General
+8,json,JSON file,General
+9,xml,XML file,General
+10,yaml,YAML file,General
+11,dat,PRESTO time series file,General
+12,tim,Sigproc time series file,General
+13,ar,Folded archive file,General
+14,pfd,PRESTO folded archive file,General
+15,gz,GZIP compressed file,General
+16,bestprof,,General
+17,ps,,General

@@ -7,7 +7,7 @@ IMAGES["vishnubk/peasoup"]="latest"
 IMAGES["vishnubk/pulsar-miner"]="turing-sm75"
 IMAGES["vishnubk/pulsarx"]="latest"
 
-apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
+#apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
 # Output file
 OUTPUT_FILE="docker_image_digests.csv"
 

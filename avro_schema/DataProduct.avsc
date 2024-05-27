@@ -5,7 +5,7 @@
   "fields": [
     {
       "name": "id",
-      "type": "string"
+      "type": "bytes"
     },
     {
       "name": "beam_id",
@@ -32,17 +32,7 @@
     },
     {
       "name": "available",
-      "type": ["null", "boolean"],
-      "default": null
-    },
-    {
-      "name": "upload_date",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "modification_date",
-      "type": ["null", "string"],
+      "type": ["null", "int"],
       "default": null
     },
     {
@@ -52,7 +42,7 @@
     },
     {
       "name": "locked",
-      "type": ["null", "boolean"],
+      "type": ["null", "int"],
       "default": null
     },
     {
@@ -87,7 +77,7 @@
     },
     {
       "name": "created_by_processing_id",
-      "type": ["null", "string"],
+      "type": ["null", "bytes"],
       "default": null
     },
     {

@@ -55,6 +55,19 @@ def print_table(table_name):
         for row in result:
             print(row)
 
+
+def table_to_csv(table_name, csv_file):
+    '''
+    Write all rows in a given table to a csv file
+    '''
+    table = get_table(table_name)
+    with engine.connect() as conn:
+        stmt = select(table)
+        result = conn.execute(stmt)
+        df = pd.DataFrame(result, columns=table.columns.keys())
+        df.to_csv(csv_file, index=False)
+        print(f"Saved {table_name} table to {csv_file}")
+
 def delete_all_rows(table_name):
     
     table = get_table(table_name)
@@ -1494,7 +1507,7 @@ def dump_program_data_products_json(pipeline_id, hardware_id, beam_id, programs,
             {
                 'program_name': program['program_name'],
                 'program_id': program['program_id'],
-                'output_file_id': program['output_file_id'],
+                #'output_file_id': program['output_file_id'],
                 'data_products': [
                     {'dp_id': dp_id, 'filename': filename} for dp_id, filename in program.get('data_products', [])
                 ]
@@ -1652,23 +1665,23 @@ def setup_programs(config, docker_image_hashes):
         {
             'program_name': 'filtool',
             'program_id': config['filtool_id'],
-            'output_file_id': config['filtool_output_file_type_id'],
+            #'output_file_id': config['filtool_output_file_type_id'],
             'data_products': config['raw_data_with_id']
         },
         {
             'program_name': 'peasoup',
             'program_id': config['peasoup_id'],
-            'output_file_id': config['peasoup_output_file_type_id'],
+            #'output_file_id': config['peasoup_output_file_type_id'],
         },
         {
             'program_name': 'pulsarx',
             'program_id': config['pulsarx_id'],
-            'output_file_id': config['pulsarx_output_file_type_id'],
+            #'output_file_id': config['pulsarx_output_file_type_id'],
         },
         {
             'program_name': 'prepfold',
             'program_id': config['prepfold_id'],
-            'output_file_id': config['prepfold_output_file_type_id'],
+            #'output_file_id': config['prepfold_output_file_type_id'],
         }
     ]
 
@@ -1706,11 +1719,15 @@ def main():
     #Run this first before upload_data.py
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
+    #table_to_csv("file_type", "file_type.csv")
     delete_all_rows("processing")
     reset_primary_key_counter("processing")
     delete_all_rows("processing_dp_inputs")
     reset_primary_key_counter("processing_dp_inputs")
+    # delete_all_rows("data_product")
+    # reset_primary_key_counter("data_product")
     sys.exit()
+   
     params = initialize_configs(file_path)
     project_id, telescope_id, hardware_id = insert_basic_records(params)
     obs_details = extract_observation_details(params['obs_header'])
@@ -1744,18 +1761,18 @@ def main():
    
     # Insert program details into the database and retrieve IDs (assuming these functions exist)
     filtool_id = insert_filtool(filtool_params['rfi_filter'], filtool_params['telescope'], filtool_params['threads'], filtool_params['image_name'], filtool_params['version'], filtool_params['container_type'], filtool_params['hash'], return_id=True)
-    output_file_type_name = ['fil']
-    filtool_output_file_type_id = []
-    for file_type in output_file_type_name:
-        filtool_file_type_id = insert_file_type(file_type, return_id=True)
-        filtool_output_file_type_id.append(filtool_file_type_id)
+    # output_file_type_name = ['fil']
+    # filtool_output_file_type_id = []
+    # for file_type in output_file_type_name:
+    #     filtool_file_type_id = insert_file_type(file_type, return_id=True)
+    #     filtool_output_file_type_id.append(filtool_file_type_id)
     
     peasoup_id = insert_peasoup(peasoup_params['acc_start'], peasoup_params['acc_end'], peasoup_params['min_snr'], peasoup_params['ram_limit_gb'], peasoup_params['nh'], peasoup_params['ngpus'], peasoup_params['total_cands_limit'], peasoup_params['fft_size'], peasoup_params['dm_file'], peasoup_params['image_name'], peasoup_params['version'], peasoup_params['container_type'], peasoup_params['hash'], return_id=True)
-    output_file_type_name = ['xml']
-    peasoup_output_file_type_id = []
-    for file_type in output_file_type_name:
-        peasoup_file_type_id = insert_file_type(file_type, return_id=True)
-        peasoup_output_file_type_id.append(peasoup_file_type_id)
+    # output_file_type_name = ['xml']
+    # peasoup_output_file_type_id = []
+    # for file_type in output_file_type_name:
+    #     peasoup_file_type_id = insert_file_type(file_type, return_id=True)
+    #     peasoup_output_file_type_id.append(peasoup_file_type_id)
     
     if pulsarx_params['subint_length'] == 'null':
         pulsarx_params['subint_length'] = tobs/64
@@ -1771,21 +1788,21 @@ def main():
     else:
         prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], rfifind_mask = prepfold_params['rfifind_mask'], return_id=True)
 
-    output_file_type_name = ['pfd', 'bestprof', 'ps', 'png']
-    prepfold_output_file_type_id = []
-    for file_type in output_file_type_name:
-        prepfold_file_type_id = insert_file_type(file_type, return_id=True)
-        prepfold_output_file_type_id.append(prepfold_file_type_id)
+    #output_file_type_name = ['pfd', 'bestprof', 'ps', 'png']
+    # prepfold_output_file_type_id = []
+    # for file_type in output_file_type_name:
+    #     prepfold_file_type_id = insert_file_type(file_type, return_id=True)
+    #     prepfold_output_file_type_id.append(prepfold_file_type_id)
     
     programs_config = setup_programs({
         'filtool_id': filtool_id,  
         'peasoup_id': peasoup_id,  
         'pulsarx_id': pulsarx_id,  
         'prepfold_id': prepfold_id,
-        'filtool_output_file_type_id': filtool_output_file_type_id,  
-        'peasoup_output_file_type_id': peasoup_output_file_type_id,  
-        'pulsarx_output_file_type_id': pulsarx_output_file_type_id,
-        'prepfold_output_file_type_id': prepfold_output_file_type_id,
+        # 'filtool_output_file_type_id': filtool_output_file_type_id,  
+        # 'peasoup_output_file_type_id': peasoup_output_file_type_id,  
+        # 'pulsarx_output_file_type_id': pulsarx_output_file_type_id,
+        # 'prepfold_output_file_type_id': prepfold_output_file_type_id,
         'raw_data_with_id': raw_data_with_id
     }, docker_image_hashes)
     
