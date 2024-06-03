@@ -33,16 +33,6 @@
       "default": null
     },
     {
-      "name": "filename",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "filepath",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
       "name": "search_candidate_id",
       "type": ["null", "bytes"],
       "default": null

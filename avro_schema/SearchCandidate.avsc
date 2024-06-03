@@ -73,16 +73,6 @@
       "default": null
     },
     {
-      "name": "filename",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "filepath",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
       "name": "nh",
       "type": ["null", "int"],
       "default": null

@@ -15,6 +15,7 @@ import your
 import subprocess
 import uuid
 import json
+import uuid_utils
 #from natsort import natsorted
 # Load environment variables from .env file
 load_dotenv()
@@ -1108,8 +1109,8 @@ def insert_data_product(beam_id, file_type_id, filename, filepath, available, lo
         
         if result is None:
 
-            new_id = uuid.uuid4()  # Generate a UUID
-            binary_id = new_id.bytes  # Convert UUID to a 16-byte binary format
+            new_id = uuid_utils.generate_uuid_string()
+            binary_id = uuid_utils.convert_uuid_string_to_binary(new_id)
             
             stmt = insert(data_product_table).values(
                 id = binary_id,
@@ -1144,8 +1145,8 @@ def insert_data_product(beam_id, file_type_id, filename, filepath, available, lo
         else:
             print(f"Data product already exists in data_product table. Skipping...")
             if return_id:
-                existing_uuid = uuid.UUID(bytes=bytes(result[0]))
-                return str(existing_uuid)
+                existing_uuid = uuid_utils.convert_binary_uuid_to_string(result[0])
+                return existing_uuid
 
 
 def insert_search_candidate(pointing_id, beam_id, processing_id, spin_period, dm, snr, filename, filepath, nh, dp_id, candidate_id_in_file, pdot=None, pdotdot=None, pb=None, x=None, t0=None, omega=None, e=None, ddm_count_ratio=None, ddm_snr_ratio=None, nassoc=None, metadata_hash=None, candidate_filter_id=None, return_id=False):
@@ -1465,7 +1466,6 @@ def dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_
     Parameters:
     - pipeline_id (int): The unique identifier for the pipeline.
     - hardware_id (int): The unique identifier for the hardware.
-    - pointing_id (int): The unique identifier for the pointing.
     - beam_id (int): The unique identifier for the beam.
     - programs (list of dicts): List of program configurations. Each dictionary should have:
         - program_name (str): The name of the program (e.g., "filtool", "peasoup").
@@ -1478,7 +1478,6 @@ def dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_
     {
         "pipeline_id": <pipeline_id>,
         "hardware_id": <hardware_id>,
-        "pointing_id": <pointing_id>,
         "beam_id": <beam_id>,
         "programs": [
             {
@@ -1504,14 +1503,14 @@ def dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_
     json_data = {
         'pipeline_id': pipeline_id,
         'hardware_id': hardware_id,
+        'pointing_id': pointing_id,
         'beam_id': beam_id,
         'programs': [
             {
                 'program_name': program['program_name'],
                 'program_id': program['program_id'],
-                #'output_file_id': program['output_file_id'],
                 'data_products': [
-                    {'dp_id': dp_id, 'filename': filename} for dp_id, filename in program.get('data_products', [])
+                    {'dp_id': dp_id, 'filename': filename, 'process_dp_input': process_dp_input} for dp_id, filename, process_dp_input in program.get('data_products', [])
                 ]
             } for program in programs
         ]
@@ -1667,23 +1666,20 @@ def setup_programs(config, docker_image_hashes):
         {
             'program_name': 'filtool',
             'program_id': config['filtool_id'],
-            #'output_file_id': config['filtool_output_file_type_id'],
             'data_products': config['raw_data_with_id']
+
         },
         {
             'program_name': 'peasoup',
             'program_id': config['peasoup_id'],
-            #'output_file_id': config['peasoup_output_file_type_id'],
         },
         {
             'program_name': 'pulsarx',
             'program_id': config['pulsarx_id'],
-            #'output_file_id': config['pulsarx_output_file_type_id'],
         },
         {
             'program_name': 'prepfold',
             'program_id': config['prepfold_id'],
-            #'output_file_id': config['prepfold_output_file_type_id'],
         }
     ]
 
@@ -1711,8 +1707,9 @@ def insert_data_products(data_products, beam_id, file_type_id, hardware_id):
             dp['tobs'], dp['nsamples'], dp['freq_start_mhz'], dp['freq_end_mhz'],
             hardware_id, dp['nchans'], dp['nbits'], tstart=dp['tstart'], return_id=True
         )
+        process_dp_input_id = uuid_utils.generate_uuid_string()
         # Storing the data product ID along with its filepath and filename
-        raw_data_with_id.append([dp_id, os.path.join(dp['filepath'], dp['filename'])])
+        raw_data_with_id.append([dp_id, os.path.join(dp['filepath'], dp['filename']), process_dp_input_id])
 
     return raw_data_with_id
 
@@ -1722,15 +1719,17 @@ def main():
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
     #table_to_csv("file_type", "file_type.csv")
-    delete_all_rows("search_candidate")
-    reset_primary_key_counter("search_candidate")
-    delete_all_rows("processing")
-    reset_primary_key_counter("processing")
-    delete_all_rows("processing_dp_inputs")
-    reset_primary_key_counter("processing_dp_inputs")
+    # delete_all_rows("fold_candidate")
+    # reset_primary_key_counter("fold_candidate")
+    # delete_all_rows("search_candidate")
+    # reset_primary_key_counter("search_candidate")
+    # delete_all_rows("processing")
+    # reset_primary_key_counter("processing")
+    # delete_all_rows("processing_dp_inputs")
+    # reset_primary_key_counter("processing_dp_inputs")
     # delete_all_rows("data_product")
     # reset_primary_key_counter("data_product")
-    sys.exit()
+    #sys.exit()
    
     params = initialize_configs(file_path)
     project_id, telescope_id, hardware_id = insert_basic_records(params)
@@ -1771,11 +1770,7 @@ def main():
     if pulsarx_params['subint_length'] == 'null':
         pulsarx_params['subint_length'] = tobs/64
     pulsarx_id = insert_pulsarx(pulsarx_params['nsubband'], pulsarx_params['subint_length'], pulsarx_params['clfd_q_value'], pulsarx_params['fast_nbins'], pulsarx_params['slow_nbins'], pulsarx_params['rfi_filter'], pulsarx_params['threads'], pulsarx_params['image_name'], pulsarx_params['version'], pulsarx_params['container_type'], pulsarx_params['hash'], return_id=True)
-    output_file_type_name = ['ar', 'png']
-    pulsarx_output_file_type_id = []
-    for file_type in output_file_type_name:
-        pulsarx_file_type_id = insert_file_type(file_type, return_id=True)
-        pulsarx_output_file_type_id.append(pulsarx_file_type_id)
+    
 
     if prepfold_params['mask'] == 'null':
         prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], return_id=True)
