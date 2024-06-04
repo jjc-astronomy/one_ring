@@ -3,6 +3,8 @@ RESULTS/
 results/
 OLD_RESULTS/
 trace*
+core*
+*.pyc
 *.fil
 *.html
 .nextflow*

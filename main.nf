@@ -218,6 +218,44 @@ process kafka_prepfold {
     """
 }
 
+process kafka_create_candyjar_csv_presto{
+    label 'prepfold'
+    container "${params.presto_singularity_image}"
+    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/03_FOLDING/", pattern: "*.csv", mode: 'copy'
+    input:
+    path data_dir
+    path filterbank_file
+
+    output:
+    path "*.csv"
+
+    """
+    #!/bin/bash
+    python ${params.prepare_candyjar} -d ${data_dir} -m ${params.obs_metafile} -f ${filterbank_file} -p presto
+
+
+    """
+
+
+}
+
+process kafka_create_candyjar_csv_pulsarx{
+    label 'prepfold'
+    container "${params.presto_singularity_image}"
+    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/02_FOLDING/", pattern: "*.csv", mode: 'copy'
+    input:
+    path data_dir
+    path filterbank_file
+
+    """
+    #!/bin/bash
+    python ${params.prepare_candyjar} -d ${data_dir} -m ${params.obs_metafile} -f ${filterbank_file} -p pulsarx
+
+
+    """
+
+
+}
 
 
 process filtool {
@@ -455,6 +493,8 @@ workflow {
     pulsarx_output = kafka_pulsarx(peasoup_results.pulsarx, params.pipeline_id, params.hardware_id, params.beam_id, params.pulsarx.fold_template, pulsarx_id, execution_order, "pulsarx")
     //Start Prepfold
     prepfold_output = kafka_prepfold(peasoup_results.prepfold, params.pipeline_id, params.hardware_id, params.beam_id, prepfold_id, execution_order, "prepfold")
+    
+    //Create CandyJar CSV for PulsarX
 
 
 
