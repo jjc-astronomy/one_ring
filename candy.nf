@@ -133,7 +133,7 @@ process kafka_pulsarx {
     script:
     """
     #!/bin/bash
-    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -p ${pulsarx_fold_template} -b ${params.beam} -threads ${params.pulsarx.threads} -utc ${params.utc} -rfi ${params.pulsarx.rfi_filter} -clfd ${params.pulsarx.clfd_q_value}
+    python3 ${params.folding.fold_script} -i ${input_dp} -t pulsarx -p ${pulsarx_fold_template} -b ${params.beam} -threads ${params.pulsarx.threads} -utc ${params.utc} -rfi ${params.pulsarx.rfi_filter} -clfd ${params.pulsarx.clfd_q_value}
     
     # Collect output files and generate UUIDs for Data Product Table
     fold_cands=\$(ls -v *.ar)
@@ -152,10 +152,10 @@ process kafka_pulsarx {
         fold_candidate_id="\$fold_candidate_id \$uuid"
     done
 
-    python ${params.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
+    python3 ${params.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
     search_fold_merged=search_fold_merged.csv
     data_dir=\$(pwd)
-    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p pulsarx -c ${baseDir}/data_config.cfg -db ${baseDir}/raw_dp_with_ids.json
+    python3 ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p pulsarx
 
     rest_files=\$(ls -v *.png *.csv)
     rest_dp_id=""
@@ -172,7 +172,7 @@ process kafka_pulsarx {
 process kafka_prepfold {
     label 'prepfold'
     container "${params.presto_singularity_image}"
-    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/03_FOLDING/", pattern: "*.{pfd,bestprof,ps,png,csv}", mode: 'copy'
+    publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/03_FOLDING/", pattern: "*.{pfd*, csv}", mode: 'copy'
 
     input:
     tuple val(process_uuid), val(input_dp_id), val(input_dp), val(process_input_dp_id) // List
@@ -209,7 +209,7 @@ process kafka_prepfold {
     data_dir=\$(pwd)
     python ${params.merged_fold_search} -p presto -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id}
     search_fold_merged=search_fold_merged.csv
-    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p presto -c ${baseDir}/data_config.cfg -db ${baseDir}/raw_dp_with_ids.json
+    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p presto
 
     rest_files=\$(ls -v *.bestprof *.ps *.png *.csv)
     rest_dp_id=""
@@ -223,6 +223,65 @@ process kafka_prepfold {
     
     """
 }
+
+// process kafka_create_candyjar_csv_presto {
+//     label 'candyjar'
+//     container "${params.presto_singularity_image}"
+//     publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/03_FOLDING/", pattern: "*.csv", mode: 'copy'
+    
+//     input:
+//     tuple val(process_uuid), val(input_dp_id), val(input_dp), val(process_input_dp_id) // List
+//     path pfd_files
+//     val(program_name)
+
+//     output:
+//     path "candidates.csv"
+//     env(output_dp)
+//     env(output_dp_id)
+
+//     script:
+//     """
+//     #!/bin/bash
+//     # Get the directory of the first pfd file
+//     data_dir=\$(dirname \$(ls -v ${pfd_files} | head -n 1))
+//     echo "Data directory: \${data_dir}"
+
+//     # Run the Python script with the determined data directory
+//     python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p presto
+//     output_dp=\$(ls -v candidates.csv)
+//     output_dp_id=\$(uuidgen)
+//     """
+// }
+
+
+// process kafka_create_candyjar_csv_pulsarx{
+//     label 'candyjar'
+//     container "${params.presto_singularity_image}"
+//     publishDir "RESULTS/${params.target}/${params.utc}/${params.beam}/02_FOLDING/", pattern: "*.csv", mode: 'copy'
+//     input:
+//     tuple val(process_uuid), val(input_dp_id), val(input_dp), val(process_input_dp_id) // List
+//     path ar_files
+//     val(program_name)
+
+//     output:
+//     path "candidates.csv"
+//     env(output_dp)
+//     env(output_dp_id)
+
+//     """
+//     #!/bin/bash
+//     # Get the directory of the first pfd file
+//     data_dir=\$(dirname \$(ls -v ${ar_files} | head -n 1))
+//     echo "Data directory: \${data_dir}"
+//     python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p pulsarx
+//     output_dp=\$(ls -v candidates.csv)
+//     output_dp_id=\$(uuidgen)
+
+//     """
+
+
+// }
+
 
 process filtool {
     label 'filtool'
@@ -244,6 +303,28 @@ process filtool {
     filtool -t ${threads} --telescope ${telescope} -z ${rfi_filter} --cont -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM} -f ${fil_file} -s ${POINTING} 
     """
 }
+
+// process rfifind{
+//     label 'short'
+//     container "${params.presto_singularity_image}"
+//     publishDir "RESULTS/${POINTING}/${UTC_OBS}/${BAND}/${BEAM}/02_RFIFIND/", pattern: "*.rfifind*", mode: 'copy'
+
+//     input:
+//     tuple path(fil_file), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+//     val threads, val time, val timesig, val freqsig, val intfrac, val chanfrac
+
+//     output:
+//     tuple path("${POINTING}_${BAND}_${UTC_OBS}_${BEAM}_rfifind.mask"), val(POINTING), val(BAND), val(UTC_OBS), val(BEAM)
+
+//     script:
+//     """
+//     rfifind -nooffsets -noscales -time ${time} -timesig ${timesig} -freqsig ${freqsig} -intfrac ${intfrac} -chanfrac ${chanfrac} -o ${POINTING}_${BAND}_${UTC_OBS}_${BEAM}_rfifind -ncpus ${threads} ${fil_file}
+//     """
+
+
+// }
+
+
 
 process peasoup {
     label 'peasoup'
@@ -405,6 +486,7 @@ workflow {
     
     filtool_output_filename = "${params.target}_${params.utc}_${params.beam}_01.fil"
     filtool_process_uuid = generateUUID()
+    //filtool_process_uuid = "02997721-10fb-42a7-bafd-5c138b2678d8"
 
 
     filtool_channel = kafka_filtool(filtool_process_uuid, filtool_input_dp_ids, filtool_input_dp_files, filtool_process_input_dp_ids, params.pipeline_id, params.hardware_id, filtool_id, execution_order, "filtool", filtool_output_filename, params.beam_id)
@@ -417,6 +499,25 @@ workflow {
        
         return tuple(peasoup_process_uuid, filtool_cleaned_file_uuid, filtool_cleaned_file, peasoup_input_dp_uuid)
     }
+
+  
+
+
+    // candyjar_presto = filtool_channel.map { item ->
+    //     def (filtool_cleaned_file, filtool_cleaned_file_uuid, tsamp, tobs, nsamples, startMHz, endMHz, tstart, tstartUTC, foff, nchans, nbits) = item
+    //     def candyjar_presto_process_uuid = generateUUID()
+    //     def candyjar_presto_input_dp_uuid = generateUUID()
+    //     return tuple(candyjar_presto_process_uuid, filtool_cleaned_file_uuid, filtool_cleaned_file, candyjar_presto_input_dp_uuid)
+    // }
+
+    // candyjar_pulsarx = filtool_channel.map { item ->
+    //     def (filtool_cleaned_file, filtool_cleaned_file_uuid, tsamp, tobs, nsamples, startMHz, endMHz, tstart, tstartUTC, foff, nchans, nbits) = item
+    //     def candyjar_pulsarx_process_uuid = generateUUID()
+    //     def candyjar_pulsarx_input_dp_uuid = generateUUID()
+        
+    //     return tuple(candyjar_pulsarx_process_uuid, filtool_cleaned_file_uuid, filtool_cleaned_file, candyjar_pulsarx_input_dp_uuid)
+    // }
+
 
     //Start Peasoup
     execution_order += 1
@@ -442,7 +543,29 @@ workflow {
     //Start Prepfold
     prepfold_channel = kafka_prepfold(peasoup_results.prepfold, params.pipeline_id, params.hardware_id, params.beam_id, prepfold_id, execution_order, "prepfold")
     
-    
+    //Create CandyJar CSV for PulsarX
+
+    // prepfold_output = prepfold_channel.map { item ->
+    //     def (pfd_files, bestprof_files, ps_files, png_files, search_fold_merged, output_dp, output_dp_id, fold_candidate_id, search_fold_merged1) = item
+
+    //     return pfd_files
+
+    // }
+
+    // pulsarx_output = pulsarx_channel.map { item ->
+    //     def (ar_files, png_files, cands_files, search_fold_merged, output_dp, output_dp_id, pulsarx_cands_file, fold_candidate_id, search_fold_merged1) = item
+
+    //     return ar_files
+
+    // }
+
+    // def program_name_presto = "CandyJar_Presto"
+    // kafka_create_candyjar_csv_presto(candyjar_presto, prepfold_output, program_name_presto)
+    // def program_name_pulsarx = "CandyJar_PulsarX"
+    // kafka_create_candyjar_csv_pulsarx(candyjar_pulsarx, pulsarx_output, program_name_pulsarx)
+
+
+
 
 }
   

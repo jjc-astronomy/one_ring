@@ -1729,7 +1729,7 @@ def main():
     # reset_primary_key_counter("processing_dp_inputs")
     # delete_all_rows("data_product")
     # reset_primary_key_counter("data_product")
-    #sys.exit()
+    # sys.exit()
    
     params = initialize_configs(file_path)
     project_id, telescope_id, hardware_id = insert_basic_records(params)
