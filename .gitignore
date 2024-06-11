@@ -4,6 +4,7 @@ results/
 OLD_RESULTS/
 trace*
 core*
+*.json
 *.pyc
 *.fil
 *.html

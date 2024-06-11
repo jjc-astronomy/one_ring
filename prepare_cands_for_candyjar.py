@@ -338,23 +338,22 @@ if __name__ == '__main__':
         utc_obj = datetime.strptime(utc_start, "%Y-%m-%d-%H:%M:%S")
         utc_start = utc_obj.isoformat()
 
-    if beam_name == "ptuse":
+    #if beam_name == "ptuse":
 
-        if args.process == "presto":
+    if args.process == "presto":
 
-            create_candyjar_csv_presto(df, args.meta, args.filterbank, candyjar_output_file, pointing_id, beam_id, beam_name, source_name, utc_start, header)
+        create_candyjar_csv_presto(df, args.meta, args.filterbank, candyjar_output_file, pointing_id, beam_id, beam_name, source_name, utc_start, header)
 
-        elif args.process == "pulsarx":
+    elif args.process == "pulsarx":
 
-            pulsarx_cand_file = glob.glob(f"{data_dir}/*.cands")
-            # Read the first 10 rows of the file
-            pulsarx_cand_file = pd.read_csv(pulsarx_cand_file[0], nrows=11, header=None)
+        pulsarx_cand_file = glob.glob(f"{data_dir}/*.cands")
+        # Read the first 10 rows of the file
+        pulsarx_cand_file = pd.read_csv(pulsarx_cand_file[0], nrows=11, header=None)
 
-            # Process the file to remove hashes and split into key-value pairs
-            pulsarx_cand_file['line'] = pulsarx_cand_file[0].str.lstrip('#')
-            pulsarx_cand_file[['key', 'value']] = pulsarx_cand_file['line'].str.split(n=1, expand=True)
+        # Process the file to remove hashes and split into key-value pairs
+        pulsarx_cand_file['line'] = pulsarx_cand_file[0].str.lstrip('#')
+        pulsarx_cand_file[['key', 'value']] = pulsarx_cand_file['line'].str.split(n=1, expand=True)
 
-            # Convert to dictionary
-            pulsarx_metadata = pd.Series(pulsarx_cand_file['value'].values, index=pulsarx_cand_file['key']).to_dict()
-            create_candyjar_csv_pulsarx(df, args.meta, args.filterbank, candyjar_output_file, pointing_id, beam_id, beam_name, source_name, utc_start, header, pulsarx_metadata)
-    
+        # Convert to dictionary
+        pulsarx_metadata = pd.Series(pulsarx_cand_file['value'].values, index=pulsarx_cand_file['key']).to_dict()
+        create_candyjar_csv_pulsarx(df, args.meta, args.filterbank, candyjar_output_file, pointing_id, beam_id, beam_name, source_name, utc_start, header, pulsarx_metadata)

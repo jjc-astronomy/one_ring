@@ -16,6 +16,7 @@ import subprocess
 import uuid
 import json
 import uuid_utils
+import re
 #from natsort import natsorted
 # Load environment variables from .env file
 load_dotenv()
@@ -25,7 +26,7 @@ DB_SERVER = os.getenv("DB_HOST")  # Insert your DB address if it's not on Panopl
 DB_PORT = os.getenv("DB_PORT")
 DB_USERNAME = os.getenv("DB_USERNAME")
 DB_PASSWORD = os.getenv("DB_PASSWORD")  # Change this to your Panoply/Postgres password
-DBNAME = 'compact'  # Database name
+DBNAME = 'testdb'  # Database name
 
 connection_url = URL.create(
     "mysql+mysqlconnector", 
@@ -416,7 +417,7 @@ def insert_beam(beam_name, beam_ra_str, beam_dec_str, pointing_id, beam_type_id,
             if return_id:
                 return result[0]  # Assuming the first column selected is the id
 
-
+        
 def insert_beam_without_pointing_id(beam_name, beam_ra_str, beam_dec_str, beam_type_name, utc_start_str, project_name, telescope_name, target_name, freq_band, tsamp_seconds, is_coherent=True, return_id=False):
     '''
     Insert a new beam into the beams table if it doesn't already exist.
@@ -498,7 +499,7 @@ def insert_antenna(name, telescope_id, description=None, latitude_degrees=None, 
                 antenna_id = db_update.lastrowid
                 return antenna_id
         else:
-            print(f"{name} already exists in antenna table for telescope {telescope_name}. Skipping...")
+            print(f"{name} already exists in antenna table for telescope {telescope_id}. Skipping...")
             if return_id:
                 return result[0]
 
@@ -1105,7 +1106,7 @@ def insert_data_product(beam_id, file_type_id, filename, filepath, available, lo
             )
 
         result = conn.execute(stmt).first()
-        #result = conn.execute(stmt).fetchone()
+        
         
         if result is None:
 
@@ -1145,6 +1146,7 @@ def insert_data_product(beam_id, file_type_id, filename, filepath, available, lo
         else:
             print(f"Data product already exists in data_product table. Skipping...")
             if return_id:
+                
                 existing_uuid = uuid_utils.convert_binary_uuid_to_string(result[0])
                 return existing_uuid
 
@@ -1224,7 +1226,37 @@ def insert_user_labels(fold_candidate_id, user_id, rfi=None, noise=None, t1_cand
         if return_id:
             return db_update.lastrowid
 
-def insert_beam_antenna(antenna_name, beam_id, description=None, return_id=False):
+def insert_beam_antenna(antenna_id, beam_id, description=None, return_id=False):
+    '''
+    Insert a new beam_antenna into the beam_antenna table if it doesn't already exist
+    '''
+    beam_antenna_table = get_table("beam_antenna")
+    with engine.connect() as conn:
+        # Check if a beam_antenna with the same antenna_id and beam_id exists
+        stmt = (
+            select(beam_antenna_table)
+            .where(beam_antenna_table.c.antenna_id == antenna_id)
+            .where(beam_antenna_table.c.beam_id == beam_id)
+            .limit(1)
+        )
+        result = conn.execute(stmt).first()
+        if result is None:
+            stmt = insert(beam_antenna_table).values(antenna_id=antenna_id, beam_id=beam_id, description=description)
+            db_update = conn.execute(stmt)
+            conn.commit()
+            print(f"Added beam_id {beam_id} with antenna_id {antenna_id} to beam_antenna table")
+            if return_id:
+                return db_update.lastrowid
+        else:
+            print(f"Beam_id {beam_id} with antenna_id {antenna_id} already exists in beam_antenna table. Skipping...")
+            if return_id:
+                return result[0]
+
+
+
+
+
+def insert_beam_antenna_old(antenna_name, beam_id, description=None, return_id=False):
     '''
     Insert a new beam_antenna into the beam_antenna table if it doesn't already exist
     '''
@@ -1294,7 +1326,16 @@ def parse_meertime_obs_header(file_path):
     return obs_dict
 
 
-def get_tobs_and_metadata(data):
+
+
+def parse_apsuse_meta_file(filename):
+    with open(filename, 'r') as file:
+        data = file.read()
+        parsed_dict = json.loads(data)
+    return parsed_dict
+
+
+def get_tobs_and_metadata(data, project_name):
     """
     Calculate the total observation time of a list of files and extract metadata from the first file.
 
@@ -1305,17 +1346,29 @@ def get_tobs_and_metadata(data):
     - The total observation time calculated from the first and last file in the list.
     - The lowest and highest frequency of the observation.
     """
-    # Load the first and last file headers only, assuming uniformity across files for tsamp and nspectra.
-    first_header = your.Your(data[0]).your_header
-    last_header = your.Your(data[-1]).your_header
-    central_freq = first_header.center_freq
-   
+    if project_name == "meertime":
+        # Load the first and last file headers only, assuming uniformity across files for tsamp and nspectra.
+        first_header = your.Your(data[0]).your_header
+        last_header = your.Your(data[-1]).your_header
+        central_freq = first_header.center_freq
+    
 
-    # Calculate total observation time.
-    # (number of files - 1) * (number of spectra in a file * time per sample) + (spectra in last file * time per sample)
-    tobs = (len(data) - 1) * first_header.nspectra * first_header.tsamp + last_header.nspectra * last_header.tsamp
-    lowest_freq = central_freq - first_header.bw/2
-    highest_freq = central_freq + first_header.bw/2
+        # Calculate total observation time.
+        # (number of files - 1) * (number of spectra in a file * time per sample) + (spectra in last file * time per sample)
+        tobs = (len(data) - 1) * first_header.nspectra * first_header.tsamp + last_header.nspectra * last_header.tsamp
+        lowest_freq = central_freq - abs(first_header.bw)/2
+        highest_freq = central_freq + abs(first_header.bw)/2
+
+    elif project_name == "trapum":
+
+        first_header = your.Your(data[0]).your_header
+        central_freq = first_header.center_freq
+        # Calculate total observation time.
+        tobs = first_header.tsamp * first_header.nspectra
+        lowest_freq = central_freq - abs(first_header.bw)/2
+        highest_freq = central_freq + abs(first_header.bw)/2
+        
+        
     return tobs, lowest_freq, highest_freq
 
 def get_metadata_of_all_files(data):
@@ -1332,7 +1385,7 @@ def get_metadata_of_all_files(data):
     for file in data:
         header = your.Your(file).your_header
         central_freq = header.center_freq
-        bandwidth = header.bw
+        bandwidth = abs(header.bw)
         lowest_freq = central_freq - bandwidth/2
         highest_freq = central_freq + bandwidth/2
 
@@ -1499,8 +1552,9 @@ def dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_
         {"program_name": "peasoup", "program_id": 101, "output_file_id": 201, "data_products": [("dp3", "file3.ps"), ("dp4", "file4.ps")]}
     ])
     """
-    
+  
     json_data = {
+        'json_db_ids_filename': output_filename,
         'pipeline_id': pipeline_id,
         'hardware_id': hardware_id,
         'pointing_id': pointing_id,
@@ -1607,38 +1661,98 @@ def prepare_program_parameters(params, docker_image_hashes):
 
 
 
-def extract_observation_details(data_header):
+def extract_observation_details(params):
     """
-    Extracts detailed observation parameters from the header of meertime observations. This is the coordinates for the boresight!
+    Extracts detailed observation parameters from the header of meertime observations. This is the coordinates for the boresight! and basic obs details
     """
-    obs_header = parse_meertime_obs_header(data_header)
-    header_config = {
-        'ra': obs_header['TIED_BEAM_RA'],
-        'dec': obs_header['TIED_BEAM_DEC'],
-        'utc_start_str': obs_header['UTC_START'],
-        'antenna_list': obs_header['ANTENNAE'],
-        'nchans': obs_header['SEARCH_OUTNCHAN'],
-        'tsamp': float(obs_header['SEARCH_OUTTSAMP']) * 1e-6,
-        'central_freq': round(float(obs_header['FREQ']), 2),
-        'receiver': obs_header['RECEIVER']
-    }
-    return header_config
+    data_header = params['obs_header']
+    if params['beam'] == 'ptuse':
+        obs_header = parse_meertime_obs_header(data_header)
+        header_config = {
+            'ra': obs_header['TIED_BEAM_RA'],
+            'dec': obs_header['TIED_BEAM_DEC'],
+            'utc_start_str': obs_header['UTC_START'],
+            'antenna_list': obs_header['ANTENNAE'],
+            'nchans': obs_header['SEARCH_OUTNCHAN'],
+            'tsamp': float(obs_header['SEARCH_OUTTSAMP']) * 1e-6,
+            'central_freq': round(float(obs_header['FREQ']), 2),
+            'receiver': obs_header['RECEIVER']
+        }
+        
+    
+    elif params['project'].lower() == 'trapum':
+        obs_header = parse_apsuse_meta_file(data_header)
+       
+        pattern = r"(?P<target_name>[A-Za-z0-9-_]+),\s*radec Pulsars,\s*(?P<ra>\d{2}:\d{2}:\d{2}\.\d{2}),\s*(?P<dec>[-+]?\d{2}:\d{2}:\d{2}\.\d{1,2})"
 
-def insert_observational_records(params, obs_details, project_id, telescope_id):
+        match = re.search(pattern, obs_header['boresight'])
+        utc_string = obs_header['utc_start']
+        input_format = '%Y/%m/%d %H:%M:%S'
+        utc_start = datetime.strptime(utc_string, input_format)
+        utc_start_string = utc_start.strftime('%Y-%m-%d-%H:%M:%S')
+        
+        if match:
+            target_name = match.group('target_name')
+            ra = match.group('ra')
+            dec = match.group('dec')
+         
+            
+            
+            central_freq_mhz = round(float(obs_header['centre_frequency']/1e6), 2)
+            header_config = {
+                'ra': ra,
+                'dec': dec,
+                'utc_start_str': utc_start_string,
+                'nchans': obs_header['coherent_nchans'],
+                'tsamp': float(obs_header['coherent_tsamp']),
+                'central_freq': central_freq_mhz,
+                'receiver': get_meerkat_freq_band(central_freq_mhz)
+
+            }
+
+        
+        return header_config, obs_header
+
+def insert_apsuse_trapum_beams(obs_header, data, params, pointing_id, beam_type_id, tsamp):
+    pattern = r"(?P<target_name>[A-Za-z0-9-_]+),\s*radec,\s*(?P<ra>\d{2}:\d{2}:\d{2}\.\d{2}),\s*(?P<dec>[-+]?\d{2}:\d{2}:\d{2}\.\d{1,2})"
+
+    for f in data:
+        beam_name = os.path.basename(os.path.dirname(f))
+        search_string = obs_header['beams'][beam_name]
+        match = re.search(pattern, search_string)
+        beam_id_list = []
+        if match:
+            beam_ra = match.group('ra')
+            beam_dec = match.group('dec')
+            beam_id = insert_beam(beam_name, beam_ra, beam_dec, pointing_id, beam_type_id, tsamp, is_coherent=params['is_beam_coherent'], return_id=True)
+            beam_id_list.append(beam_id)
+    return beam_id_list
+
+            
+
+
+def insert_observational_records(params, obs_details, obs_header, project_id, telescope_id):
     """
     Inserts observational records into the database and returns their IDs. This is survey dependent and needs to be modified for other surveys.
     """
+    
+    project_name = params['project'].lower()
+    print(f"Insering observational records for {project_name}")
+
     target_id = insert_target_name(params['target'], obs_details['ra'], obs_details['dec'], project_id, return_id=True)
     data = glob.glob(params['raw_data'])
-    tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data)
+   
+    tobs, lowest_freq, highest_freq = get_tobs_and_metadata(data, project_name)
+    
 
     if params['telescope'].lower() == "meerkat":
         freq_band = get_meerkat_freq_band(obs_details['central_freq'])
     else:
         freq_band = "UNKNOWN"
-
+    
+    utc_start_time_db = parse_and_format_datetime(obs_details['utc_start_str'])
     pointing_id = insert_pointing(
-        parse_and_format_datetime(obs_details['utc_start_str']),
+        utc_start_time_db,
         tobs,  
         obs_details['nchans'],
         freq_band,
@@ -1651,12 +1765,50 @@ def insert_observational_records(params, obs_details, project_id, telescope_id):
         return_id=True
     )
     beam_type_id = insert_beam_type(params['beam_type'], return_id=True)
-    beam_id = insert_beam(params['beam'], obs_details['ra'], obs_details['dec'], pointing_id, beam_type_id, obs_details['tsamp'], is_coherent=params['is_beam_coherent'], return_id=True)
+    
+    #Beam Configuration Inserts will be added when the database is
+    # pattern = r"(?P<target_name>[A-Za-z0-9-_]+),\s*radec Pulsars,\s*(?P<ra>\d{2}:\d{2}:\d{2}\.\d{2}),\s*(?P<dec>[-+]?\d{2}:\d{2}:\d{2}\.\d{1,2})"
+    # match = re.search(pattern, obs_header['boresight'])
+    # if match:
+    #     boresight_ra = match.group('ra')
+    #     boresight_dec = match.group('dec')
+    #     reference_freq_mhz = round(float(obs_header['centre_frequency']/1e6), 2)
+    #     print(f"Boresight RA: {boresight_ra}, Boresight DEC: {boresight_dec}, Reference Frequency: {reference_freq_mhz} MHz")
+        
+    
+    """
+    When no beams are specified, insert all available filterbank files. Else insert only the specified beams.
+    """
+    if params['beam'] != '*' or params['beam'] != ' ':
+        beam_id = insert_beam(params['beam'], obs_details['ra'], obs_details['dec'], pointing_id, beam_type_id, obs_details['tsamp'], is_coherent=params['is_beam_coherent'], return_id=True)
+    else:
+        beam_id_list = insert_apsuse_trapum_beams(obs_header, data, params, pointing_id, beam_type_id, obs_details['tsamp'])
+        #Rest of the code will be added later.
+    
+    #Insert Antenna and Beam Antenna
+    if int(params['is_beam_coherent']) == 1:
+        
+        print(f"This is a Coherent Beam")
+        antenna_list = obs_header['coherent_antennas'].split(',')
+        for antenna in antenna_list:
+            antenna_id = insert_antenna(antenna, telescope_id, return_id=True)
+            insert_beam_antenna(antenna_id, beam_id)
+    else:
+        print(f"This is an Incoherent Beam")
+        antenna_list = obs_header['incoherent_antennas'].split(',')
+        for antenna in antenna_list:
+            antenna_id = insert_antenna(antenna, telescope_id, return_id=True)
+            insert_beam_antenna(antenna_id, beam_id)
+
+    
     #Get file extension name and remove dot
     file_type_extension = os.path.splitext(data[0])[1][1:]  
     file_type_id = insert_file_type(file_type_extension, return_id=True)
-
+    
+    
     return target_id, pointing_id, beam_id, beam_type_id, file_type_id, tobs
+
+        
 
 def setup_programs(config, docker_image_hashes):
     """
@@ -1713,58 +1865,63 @@ def insert_data_products(data_products, beam_id, file_type_id, hardware_id):
 
     return raw_data_with_id
 
+def clear_all_columns():
+    delete_all_rows("fold_candidate")
+    reset_primary_key_counter("fold_candidate")
+    delete_all_rows("search_candidate")
+    reset_primary_key_counter("search_candidate")
+    delete_all_rows("processing")
+    reset_primary_key_counter("processing")
+    delete_all_rows("processing_dp_inputs")
+    reset_primary_key_counter("processing_dp_inputs")
+    delete_all_rows("data_product")
+    reset_primary_key_counter("data_product")
 
 def main():
     #Run this first before upload_data.py
     #nextflow config -profile nt -flat -sort > data_config.cfg
     file_path = 'data_config.cfg'
-    #table_to_csv("file_type", "file_type.csv")
-    # delete_all_rows("fold_candidate")
-    # reset_primary_key_counter("fold_candidate")
-    # delete_all_rows("search_candidate")
-    # reset_primary_key_counter("search_candidate")
-    # delete_all_rows("processing")
-    # reset_primary_key_counter("processing")
-    # delete_all_rows("processing_dp_inputs")
-    # reset_primary_key_counter("processing_dp_inputs")
-    # delete_all_rows("data_product")
-    # reset_primary_key_counter("data_product")
-    # sys.exit()
+ 
    
     params = initialize_configs(file_path)
+  
     project_id, telescope_id, hardware_id = insert_basic_records(params)
-    obs_details = extract_observation_details(params['obs_header'])
+    #print(f"Project ID: {project_id}, Telescope ID: {telescope_id}, Hardware ID: {hardware_id}")
+    
+    obs_details, obs_header = extract_observation_details(params)
+    
    
     
-  
+   
 
     # Retrieve repo and other metadata
     repo_name, branch_name, last_commit_id = get_repo_details()
     pipeline_id = insert_pipeline(params['pipeline_name'], repo_name, last_commit_id, branch_name, description='Time Domain Full length Accel Search using Peasoup', return_id=True)
-    
+   
    
     # Insert target and pointing data
-    target_id, pointing_id, beam_id, beam_type_id, file_type_id, tobs = insert_observational_records(params, obs_details, project_id, telescope_id)
-
-   
+    target_id, pointing_id, beam_id, beam_type_id, file_type_id, tobs = insert_observational_records(params, obs_details, obs_header, project_id, telescope_id)
+    print(f"Target ID: {target_id}, Pointing ID: {pointing_id}, Beam ID: {beam_id}, Beam Type ID: {beam_type_id}, File Type ID: {file_type_id}, TOBS: {tobs}")
     
+  
     # Get additional metadata for files and types
     data_products = get_metadata_of_all_files(sorted(glob.glob(params['raw_data'])))
     
 
     # Data product insertion
     raw_data_with_id = insert_data_products(data_products, beam_id, file_type_id, hardware_id)
+   
   
-    
     # Read docker image hashes
     docker_image_hashes = pd.read_csv('docker_image_digests.csv')
+    
 
     # Prepare program parameters
     filtool_params, peasoup_params, pulsarx_params, prepfold_params = prepare_program_parameters(params, docker_image_hashes)
    
     # Insert program details into the database and retrieve IDs (assuming these functions exist)
     filtool_id = insert_filtool(filtool_params['rfi_filter'], filtool_params['telescope'], filtool_params['threads'], filtool_params['image_name'], filtool_params['version'], filtool_params['container_type'], filtool_params['hash'], return_id=True)
-    
+    #print(f"Filtool ID: {filtool_id}")
     peasoup_id = insert_peasoup(peasoup_params['acc_start'], peasoup_params['acc_end'], peasoup_params['min_snr'], peasoup_params['ram_limit_gb'], peasoup_params['nh'], peasoup_params['ngpus'], peasoup_params['total_cands_limit'], peasoup_params['fft_size'], peasoup_params['dm_file'], peasoup_params['image_name'], peasoup_params['version'], peasoup_params['container_type'], peasoup_params['hash'], return_id=True)
    
     if pulsarx_params['subint_length'] == 'null':
@@ -1777,18 +1934,37 @@ def main():
     else:
         prepfold_id = insert_prepfold(prepfold_params['ncpus'], prepfold_params['image_name'], prepfold_params['version'], prepfold_params['container_type'], prepfold_params['hash'], rfifind_mask = prepfold_params['rfifind_mask'], return_id=True)
 
-   
-    programs_config = setup_programs({
-        'filtool_id': filtool_id,  
-        'peasoup_id': peasoup_id,  
-        'pulsarx_id': pulsarx_id,  
-        'prepfold_id': prepfold_id,
-        'raw_data_with_id': raw_data_with_id
-    }, docker_image_hashes)
     
-   
-    # Dump JSON with the updated function that handles multiple programs
-    dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_id, programs_config)
+    if params['project'].lower() == "trapum":
+        for index, data_product in enumerate(data_products):
+            filename = os.path.basename(data_product['filename'])
+            base_filename = os.path.splitext(filename)[0]
+            output_json_name = f"{base_filename}.json"
+           
+            programs_config = setup_programs({
+                'filtool_id': filtool_id,
+                'peasoup_id': peasoup_id,
+                'pulsarx_id': pulsarx_id,
+                'prepfold_id': prepfold_id,
+                'raw_data_with_id': [raw_data_with_id[index]]
+            }, docker_image_hashes)
+            #print(f"Programs Config: {programs_config}")
+
+        
+            dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_id, programs_config, output_filename = output_json_name)
+    
+    else:
+        programs_config = setup_programs({
+            'filtool_id': filtool_id,  
+            'peasoup_id': peasoup_id,  
+            'pulsarx_id': pulsarx_id,  
+            'prepfold_id': prepfold_id,
+            'raw_data_with_id': raw_data_with_id
+        }, docker_image_hashes)
+        
+    
+        # Dump JSON with the updated function that handles multiple programs
+        dump_program_data_products_json(pipeline_id, hardware_id, pointing_id, beam_id, programs_config)
 
 if __name__ == "__main__":
     main()

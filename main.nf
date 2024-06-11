@@ -59,12 +59,12 @@ process kafka_filtool {
         done < <(python3 ${params.get_metadata} -f ${output_dp})
 
     #Temporary hard fix because filtool inverts the frequency band incorrectly.
-    if [[ \${foff} -ge 0 ]]; then
-        # Make foff negative 
-        \${foff}=-\${foff}
-    fi
+    #if [[ \${foff} -ge 0 ]]; then
+    #    # Make foff negative 
+    #    \${foff}=-\${foff}
+    #fi
 
-    filedit -f \${freq_end_mhz} -F \${foff} ${output_dp}
+    #filedit -f \${freq_end_mhz} -F \${foff} ${output_dp}
 
     # Generate a UUID for the output file
     output_dp_id=\$(uuidgen)
@@ -155,7 +155,7 @@ process kafka_pulsarx {
     python ${params.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
     search_fold_merged=search_fold_merged.csv
     data_dir=\$(pwd)
-    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p pulsarx -c ${baseDir}/data_config.cfg -db ${baseDir}/raw_dp_with_ids.json
+    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.candyjar_metafile} -f ${input_dp} -p pulsarx -c ${baseDir}/data_config.cfg -db ${baseDir}/${params.json_db_ids_filename}
 
     rest_files=\$(ls -v *.png *.csv)
     rest_dp_id=""
@@ -209,7 +209,7 @@ process kafka_prepfold {
     data_dir=\$(pwd)
     python ${params.merged_fold_search} -p presto -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id}
     search_fold_merged=search_fold_merged.csv
-    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.obs_metafile} -f ${input_dp} -p presto -c ${baseDir}/data_config.cfg -db ${baseDir}/raw_dp_with_ids.json
+    python ${params.prepare_candyjar} -d \${data_dir} -m ${params.candyjar_metafile} -f ${input_dp} -p presto -c ${baseDir}/data_config.cfg -db ${baseDir}/${params.json_db_ids_filename}
 
     rest_files=\$(ls -v *.bestprof *.ps *.png *.csv)
     rest_dp_id=""

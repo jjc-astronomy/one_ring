@@ -1,5 +1,5 @@
 directory: null  # Null implies use the script's directory with 'results/' appended
-bootstrap_servers: "localhost:49092"
+bootstrap_servers: "localhost:9092"
 schema_registry_url: "http://localhost:8081"
 processing_topic: "processing"
 processing_schema_file: "avro_schema/Processing.avsc"

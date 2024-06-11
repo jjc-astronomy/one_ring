@@ -661,7 +661,7 @@ def main(config):
         directory = os.path.join(script_dir, 'results/')
     else:
         directory = config['directory']
-    
+
     # Use config values as needed
     bootstrap_servers = config['bootstrap_servers']
     schema_registry_url = config['schema_registry_url']
