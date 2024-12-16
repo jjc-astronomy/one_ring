@@ -1,0 +1,66 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "BeamConfig",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int"
+    },
+    {
+      "name": "tiling_center_ra",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tiling_center_dec",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "reference_freq",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tiling_utc",
+      "type": ["null", {"type": "string", "logicalType": "timestamp-millis"}],
+      "default": null
+    },
+    {
+      "name": "tiling_method",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "tiling_shape",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "overlap",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "coordinate_type",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "beam_shape_x",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "beam_shape_y",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "beam_shape_angle",
+      "type": ["null", "string"],
+      "default": null
+    }
+  ]
+}

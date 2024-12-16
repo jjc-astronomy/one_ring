@@ -86,7 +86,7 @@
       "default": null
     },
     {
-      "name": "tstart",
+      "name": "mjd_start",
       "type": ["null", "string"],
       "default": null
     },
@@ -102,6 +102,16 @@
     },
     {
       "name": "nchans",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "coherent_dm",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "incoherent_dm",
       "type": ["null", "int"],
       "default": null
     }

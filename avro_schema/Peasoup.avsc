@@ -18,6 +18,16 @@
       "default": null
     },
     {
+      "name": "acc_pulse_width",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "dm_pulse_width",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "min_snr",
       "type": ["null", "string"],
       "default": null
@@ -44,6 +54,16 @@
     },
     {
       "name": "fft_size",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "start_sample",
+      "type": ["null", "long"],
+      "default": null
+    },
+    {
+      "name": "nsamples",
       "type": ["null", "long"],
       "default": null
     },

@@ -56,7 +56,7 @@ process kafka_filtool {
     while IFS='=' read -r key value
         do
             declare "\$key=\$value"
-        done < <(python3 ${params.get_metadata} -f ${output_dp})
+        done < <(python3 ${params.filtool.get_metadata} -f ${output_dp})
 
     #Temporary hard fix because filtool inverts the frequency band incorrectly.
     #if [[ \${foff} -ge 0 ]]; then
@@ -106,7 +106,7 @@ process kafka_peasoup {
     fft_size=${params.peasoup.fft_size}
     peasoup -i ${input_dp} --fft_size \${fft_size} --limit ${params.peasoup.total_cands_limit} -m ${params.peasoup.min_snr} --acc_start ${params.peasoup.acc_start} --acc_end ${params.peasoup.acc_end} --dm_file ${dm_file} --ram_limit_gb ${params.peasoup.ram_limit_gb} -n ${params.peasoup.nh} -t ${params.peasoup.ngpus} -o \${output_dir}
     output_dp_id=\$(uuidgen)
-    python ${params.save_search_candidate_uuid} -i ${peasoup_output}
+    python ${params.kafka.save_search_candidate_uuid} -i ${peasoup_output}
     """
 }
 
@@ -152,7 +152,7 @@ process kafka_pulsarx {
         fold_candidate_id="\$fold_candidate_id \$uuid"
     done
 
-    python ${params.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
+    python ${params.kafka.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
     search_fold_merged=search_fold_merged.csv
     data_dir=\$(pwd)
     python ${params.prepare_candyjar} -d \${data_dir} -m ${params.candyjar_metafile} -f ${input_dp} -p pulsarx -c ${baseDir}/data_config.cfg -db ${baseDir}/${params.json_db_ids_filename}
@@ -207,7 +207,7 @@ process kafka_prepfold {
         fold_candidate_id="\$fold_candidate_id \$uuid"
     done
     data_dir=\$(pwd)
-    python ${params.merged_fold_search} -p presto -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id}
+    python ${params.kafka.merged_fold_search} -p presto -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id}
     search_fold_merged=search_fold_merged.csv
     python ${params.prepare_candyjar} -d \${data_dir} -m ${params.candyjar_metafile} -f ${input_dp} -p presto -c ${baseDir}/data_config.cfg -db ${baseDir}/${params.json_db_ids_filename}
 
@@ -330,7 +330,7 @@ process readfile_parser {
 
     script:
     """
-    bash ${params.readfile_parser} -f ${fil_file}
+    bash ${params.readfile.parser} -f ${fil_file}
     """
 }
 def fieldNames = ['Telescope', 'Pointing', 'START_UTC', 'MJD', 'RA_STR_J2000', 'DEC_STR_J2000', 'RA_DEG_J2000', 'DEC_DEG_J2000', 'TSAMP', 'CENTRAL_FREQ', 'LOW_CHAN_MHz', 'HIGH_CHAN_MHz', 'CHAN_BW_MHz', 'NUM_CHAN', 'BW_MHz', 'NBIT', 'NSAMPLES', 'TOBS']
