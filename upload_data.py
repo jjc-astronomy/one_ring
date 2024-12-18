@@ -18,6 +18,8 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import subprocess
 from uuid_utils import UUIDUtility
+import ast
+import re
 load_dotenv()
 
 
@@ -68,6 +70,7 @@ class DatabaseUploader:
         self.telescope_id = self._insert_telescope_name(self.telescope_name, return_id=True)
         self.hardware_id = self._insert_hardware(self.hardware_name, return_id=True)
 
+    
     def upload_from_csv(self, csv_file):
         """
         Read the CSV and upload all data products.
@@ -76,8 +79,8 @@ class DatabaseUploader:
 
         'filenames' may contain multiple files separated by spaces.
         """
-        logging.info(f"IMPORTANT: Ensure Your nf_config_for_data_upload.cfg is updated by running nextflow config -profile contra -flat -sort > nf_config_for_data_upload.cfg")
-        logging.info(f"Uploading data from {csv_file}")
+        self.logger.info(f"IMPORTANT: Ensure Your nf_config_for_data_upload.cfg is updated by running nextflow config -profile contra -flat -sort > nf_config_for_data_upload.cfg")
+        self.logger.info(f"Uploading data from {csv_file}")
         df = pd.read_csv(csv_file)
         nextflow_cfg = self._parse_nextflow_flat_config_from_file(self.nextflow_config_file)
         
@@ -194,7 +197,7 @@ class DatabaseUploader:
                     filehash=None,
                     metainfo=None,
                     coherent_dm=row['coherent_dm'] if 'coherent_dm' in row else None,
-                    incoherent_dm=row['incoherent_dm'] if 'incoherent_dm' in row else None
+                    subband_dm=row['subband_dm'] if 'subband_dm' in row else None
                 )
 
         #Insert pipeline
@@ -207,13 +210,89 @@ class DatabaseUploader:
             branch_name,
             return_id=True
         )
-        print(f"Pipeline ID: {pipeline_id}")
         docker_hash_df = pd.read_csv(self.docker_hash_file)
-        print(docker_hash_df)
+        
+
+        filtool_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'filtool', 'pulsarx')
+        
+        filtool_id = self._insert_filtool(
+            filtool_params, 
+            return_id=True)
+        peasoup_args = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df)
+        print(peasoup_args)
+        
+        
 
         sys.exit()
 
     
+    def _store_peasoup_configs(self, nextflow_cfg, docker_hash_df, df):
+        """
+        - Reads peasoup configs (JSON string) and dd_plan (colon-sep strings).
+        - Matches filterbank rows by coherent DM.
+        - Inserts each peasoup configuration into DB.
+        - Returns a JSON dump of all inserted records (including peasoup_id).
+        """
+        # Base container fields for peasoup
+        peasoup_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'peasoup', 'peasoup')
+        
+        # Decode peasoup JSON
+        raw_peasoup_str = nextflow_cfg['peasoup']
+        peasoup_str = bytes(raw_peasoup_str, "utf-8").decode("unicode_escape").strip()
+        peasoup_configs = json.loads(peasoup_str)  # list of dicts
+        
+        # dd_plan is colon-separated, parse via literal_eval
+        ddplan_list = ast.literal_eval(nextflow_cfg['dd_plan'])  # e.g. ["0.0:0.0:100.0:1:1", "120:110:130:0.5:1", ...]
+
+        # We'll collect all peasoup DB entries in a list
+        all_peasoup_records = []
+
+        for dd_str in ddplan_list:
+            coherent_dm, start_dm, end_dm, dm_step, tscrunch = self._process_ddplan_entry(dd_str)
+
+            # For each row in your filterbank DataFrame, match the DM
+            for _, row in df.iterrows():
+                cdm_data = row.get('subband_dm') or row.get('coherent_dm') or 0.0
+                if float(cdm_data) == float(coherent_dm):
+                    # For each peasoup config block in peasoup_configs
+                    for peasoup_cfg in peasoup_configs:
+                        # Create a fresh dict to insert, merging peasoup_params + dd_plan fields + peasoup_cfg
+                        entry = dict(peasoup_params)
+
+                        # Convert/assign the peasoup_cfg fields to match the MySQL schema
+                        entry['acc_start']        = float(peasoup_cfg['acc_start']) if peasoup_cfg['acc_start'] is not None else None
+                        entry['acc_end']          = float(peasoup_cfg['acc_end']) if peasoup_cfg['acc_end'] is not None else None
+                        entry['acc_pulse_width']  = float(peasoup_cfg['acc_pulse_width']) if peasoup_cfg['acc_pulse_width'] is not None else None
+                        entry['dm_pulse_width']   = float(peasoup_cfg['dm_pulse_width']) if peasoup_cfg['dm_pulse_width'] is not None else None
+                        entry['min_snr']          = float(peasoup_cfg['min_snr']) if peasoup_cfg['min_snr'] is not None else None
+                        entry['ram_limit_gb']     = float(peasoup_cfg['ram_limit_gb']) if peasoup_cfg['ram_limit_gb'] is not None else None
+                        entry['nharmonics']       = int(peasoup_cfg['nh']) if peasoup_cfg['nh'] is not None else None
+                        entry['ngpus']            = int(peasoup_cfg['ngpus']) if peasoup_cfg['ngpus'] is not None else None
+                        entry['total_cands_limit']= int(peasoup_cfg['total_cands']) if peasoup_cfg['total_cands'] is not None else None
+                        entry['fft_size']         = int(peasoup_cfg['fft_size']) if peasoup_cfg['fft_size'] is not None else None
+                        entry['accel_tol']        = float(peasoup_cfg['accel_tol']) if peasoup_cfg['accel_tol'] is not None else None
+                        entry['birdie_list']      = peasoup_cfg['birdie_list']
+                        entry['chan_mask']        = peasoup_cfg['chan_mask']
+                        entry['nsamples']         = int(peasoup_cfg['nsamples']) if peasoup_cfg['nsamples'] is not None else None
+                        entry['start_sample']     = int(peasoup_cfg['start_sample']) if peasoup_cfg['start_sample'] is not None else None
+
+                        # dd_plan info
+                        entry['dm_start'] = float(start_dm)
+                        entry['dm_end']   = float(end_dm)
+                        entry['dm_step']  = float(dm_step)
+                        entry['coherent_dm'] = float(coherent_dm)
+                        
+                        # Insert into DB, retrieve ID
+                        peasoup_id = self._insert_peasoup(entry, return_id=True)
+                        # Mark the inserted ID in entry
+                        entry['peasoup_id'] = peasoup_id
+                        # Save this fully resolved entry (with peasoup_id) into our list
+                        all_peasoup_records.append(entry)
+
+        # Finally, dump everything to JSON
+        peasoup_json = json.dumps(all_peasoup_records, indent=2)
+        return peasoup_json
+                        
     def _parse_nextflow_flat_config_from_file(self, file_path):
 
         config = {}
@@ -231,78 +310,46 @@ class DatabaseUploader:
               for key, value in config.items()}
 
         return nextflow_cfg
-
-    def _prepare_program_parameters(self, params, docker_image_hashes):
+    
+    def _prepare_program_parameters(self, params, docker_image_hashes, program_name, image_key):
         """
-        Prepares program configurations for filtool and peasoup based on the provided nextflow configuration.
-        This is used to get program_id(eg filtool_id, peasoup_id) with their corresponding arguments and docker hash for reproducibility.
+        Prepares program configurations based on the provided Nextflow configuration.
+
+        :param params: Dictionary of Nextflow parameters.
+        :param docker_image_hashes: DataFrame containing image hashes and versions.
+        :param program_name: Name of the program (e.g., 'filtool' or 'peasoup').
+        :param image_key: Key to look up the image in docker_image_hashes.
+        :return: Dictionary of prepared parameters ready for database insertion.
         """
-        filtool = {
-            'program_name': 'filtool',
-            'rfi_filter': params['filtool.rfi_filter'],
-            'zap_string': params['filtool.zap_string'],
-            'additional_flags': params['filtool.additional_flags'],
-            'telescope': params['filtool.telescope'],
-            'filplan': params['filtool.filplan'],
-            'time_decimation_factor': params['filtool.time_decimation_factor'],
-            'freq_decimation_factor': params['filtool.freq_decimation_factor'],
-            'nbits': params['filtool.nbits'],
-            'mean': params['filtool.mean'],
-            'std': params['filtool.std'],
-            'threads': params['filtool.threads'],
-            'image_name': os.path.basename(params['apptainer_images.pulsarx']),
-            'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0],
-            'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0],
+        # Extract program-specific parameters
+        program_params = {k.replace(f"{program_name}.", ""): v for k, v in params.items() if k.startswith(f"{program_name}.")}
+        
+        # Add common fields
+        program_params.update({
+            'program_name': program_name,
+            'container_image_name': os.path.basename(params.get(f"apptainer_images.{image_key}", "")),
+            'container_image_id': docker_image_hashes.loc[docker_image_hashes['Image'] == image_key, 'SHA256'].values[0],
+            'container_image_version': docker_image_hashes.loc[docker_image_hashes['Image'] == image_key, 'Version'].values[0],
             'container_type': "apptainer"
-        }
-        peasoup = {
-            'program_name': 'peasoup',
-            'fft_size': params['peasoup.fft_size'],
-            'start_sample': params['peasoup.start_sample'],
-            'nsamples': params['peasoup.nsamples'],
-            'acc_start': params['peasoup.acc_start'],
-            'acc_end': params['peasoup.acc_end'],
-            'dm_pulse_width': params['peasoup.dm_pulse_width'],
-            'acc_pulse_width': params['peasoup.acc_pulse_width'],
-            'min_snr': params['peasoup.min_snr'],
-            'ram_limit_gb': params['peasoup.ram_limit_gb'],
-            'nh': params['peasoup.nh'],
-            'ngpus': params['peasoup.ngpus'],
-            'total_cands': params['peasoup.total_cands'],
-            'accel_tol': params['peasoup.accel_tol'],
-            'dm_file': params['peasoup.dm_file'],
-            'image_name': os.path.basename(params['apptainer_images.peasoup']),
-            'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'SHA256'].values[0],
-            'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'peasoup', 'Version'].values[0],
-            'container_type': "apptainer"
-        }
+        })
 
-        pulsarx = {
-            'program_name': 'pulsarx',
-            'subint_length': params['pulsarx.subint_length'],
-            'clfd_q_value': params['pulsarx.clfd_q_value'],
-            'rfi_filter': params['pulsarx.rfi_filter'],
-            'fast_nbins': params['pulsarx.fast_nbins'],
-            'slow_nbins': params['pulsarx.slow_nbins'],
-            'nsubband': params['pulsarx.nsubband'],
-            'fold_template': params['pulsarx.fold_template'],
-            'threads': params['pulsarx.threads'],
-            'image_name': os.path.basename(params['apptainer_images.pulsarx']),
-            'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'SHA256'].values[0],
-            'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsarx', 'Version'].values[0],
-            'container_type': "apptainer"
-        }
+        return program_params
 
-        prepfold = {
-            'program_name': 'prepfold',
-            'ncpus': params['prepfold.ncpus'],
-            'mask': params['prepfold.mask'],
-            'image_name': os.path.basename(params['apptainer_images.presto']),
-            'hash': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsar-miner', 'SHA256'].values[0],
-            'version': docker_image_hashes.loc[docker_image_hashes['Image'] == 'pulsar-miner', 'Version'].values[0],
-            'container_type': "apptainer"
-        }
-        return filtool, peasoup, pulsarx, prepfold
+    
+    def _process_ddplan_entry(self, ddplan_entry):
+        try:
+            parts = ddplan_entry.split(':')
+            if len(parts) != 5:
+                raise ValueError(f"Invalid format for ddplan entry: '{ddplan_entry}'. Expected exactly 5 fields separated by ':'.")
+            
+            coherent_dm, start_dm, end_dm, dm_step, tscrunch = map(float, parts)
+            
+            self.logger.debug(f"Processed ddplan entry successfully: {ddplan_entry}")
+            return coherent_dm, start_dm, end_dm, dm_step, tscrunch
+
+        except ValueError as e:
+            self.logger.error(f"Error: {e}")
+            raise
 
     def _parse_metadata_for_pointing(self, df):
         """
@@ -843,7 +890,7 @@ class DatabaseUploader:
 
     def _insert_data_product(self, beam_id, file_type_id, filename, filepath, available, locked, utc_start,
                              tsamp_seconds, tobs_seconds, nsamples, freq_start_mhz, freq_end_mhz, hardware_id,
-                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, incoherent_dm=None, fft_size=None, mjd_start=None, created_by_processing_id=None):
+                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, subband_dm=None, fft_size=None, mjd_start=None, created_by_processing_id=None):
         table = self._get_table("data_product")
         with self.engine.connect() as conn:
             stmt = (
@@ -881,7 +928,7 @@ class DatabaseUploader:
                     nbits=nbits,
                     mjd_start=mjd_start,
                     coherent_dm=coherent_dm,
-                    incoherent_dm=incoherent_dm
+                    subband_dm=subband_dm
                 )
                
                 conn.execute(stmt)
@@ -889,6 +936,19 @@ class DatabaseUploader:
                 self.logger.debug(f"Added data product {filename} to data_product table")
             else:
                 self.logger.debug(f"Data product {filename} exists. Skipping...")
+    
+    def _generate_argument_hash(self, params, keys_to_include):
+
+        """
+        Generates a SHA256 hash based on the specified keys in the parameters dictionary.
+
+        :param params: Dictionary of parameters.
+        :param keys_to_include: List of keys to include in the hash.
+        :return: SHA256 hash string.
+        """
+        combined_args = "".join(str(params.get(key, "")) for key in keys_to_include)
+        return hashlib.sha256(combined_args.encode()).hexdigest()
+
 
     def _insert_pipeline(self, name, github_repo_name, github_commit_hash, github_branch, description=None, return_id = False):
         
@@ -904,7 +964,13 @@ class DatabaseUploader:
             result = conn.execute(stmt).first()
         
             if result is None:
-                stmt = insert(pipeline_table).values(name=name, description=description, github_repo_name=github_repo_name, github_commit_hash=github_commit_hash, github_branch=github_branch)
+                stmt = insert(pipeline_table).values(
+                    name=name,
+                    github_repo_name=github_repo_name,
+                    github_commit_hash=github_commit_hash,
+                    github_branch=github_branch,
+                    description=description
+                )
                 db_update = conn.execute(stmt)
                 conn.commit()
                 self.logger.debug(f"Added {name} to pipeline table")
@@ -915,6 +981,102 @@ class DatabaseUploader:
                 self.logger.debug(f"{name} exists in pipeline table. Skipping...")
                 if return_id:
                     return result[0]
+    
+    def _insert_filtool(self, params, return_id=False):
+    
+        filtool_table = self._get_table("filtool")
+        # Argument hash keys used for filtool. Modify if needed.
+        filtool_keys = [
+            'rfi_filter', 'zap_string', 'nbits', 'mean', 'std',
+            'time_decimation_factor', 'freq_decimation_factor',
+            'telescope_name', 'threads', 'extra_args', 'filplan'
+        ]
+        argument_hash = self._generate_argument_hash(params, filtool_keys)
+        container_image_id = params['container_image_id']
+        #Below are the keys that are not in the database, but are required for nextflow
+        keys_to_exclude = ['get_metadata', 'program_name']
+
+        # Handle default values and None conversions
+        defaults = {
+            'extra_args': None,
+            'zap_string': None,
+            'filplan': None,
+            'time_decimation_factor': 1,
+            'freq_decimation_factor': 1,
+            'nbits': 8,
+            'mean': 128,
+            'std': 6
+        }
+
+        for key, default in defaults.items():
+            params[key] = params.get(key, default)
+
+
+        with self.engine.connect() as conn:
+                        
+            stmt = (
+            select(filtool_table)
+            .where(filtool_table.c.argument_hash == argument_hash)
+            .where(filtool_table.c.container_image_id == container_image_id)
+            .limit(1)
+            )
+            result = conn.execute(stmt).first()
+            
+            if result is None:
+                #Add argument hash to params
+                params['argument_hash'] = argument_hash
+                #Exclude keys from params that are not in the database before inserting
+                params = {k: v for k, v in params.items() if k not in keys_to_exclude}
+                stmt = insert(filtool_table).values(params)
+                db_update = conn.execute(stmt)
+                conn.commit()
+                filtool_id = db_update.inserted_primary_key[0]
+                self.logger.debug(f"Added filtool parameters to filtool_params table")
+                if return_id:
+                    return filtool_id
+            else:
+                filtool_id = result[0]
+                self.logger.debug(f"Filtool parameters exist. Skipping...")
+                if return_id:
+                    return filtool_id
+
+    def _insert_peasoup(self, params, return_id=False):
+        peasoup_table = self._get_table("peasoup")
+        # Argument hash keys used for peasoup. Modify if needed.
+        peasoup_keys = [
+            'dm_start', 'dm_end', 'dm_step', 'coherent_dm', 'nh',
+            'fft_size', 'start_sample', 'nsamples', 'acc_start', 'acc_end',
+            'dm_pulse_width', 'acc_pulse_width', 'min_snr', 'ram_limit_gb',
+            'total_cands', 'accel_tol', 'birdie_list', 'chan_mask'
+            
+        ]
+        argument_hash = self._generate_argument_hash(params, peasoup_keys)
+        params['argument_hash'] = argument_hash
+        keys_to_exclude = ['program_name']
+        with self.engine.connect() as conn:
+            stmt = (
+            select(peasoup_table)
+            .where(peasoup_table.c.argument_hash == argument_hash)
+            .limit(1)
+            )
+            result = conn.execute(stmt).first()
+            if result is None:
+                #Exclude keys from params that are not in the database before inserting
+                params = {k: v for k, v in params.items() if k not in keys_to_exclude}
+                stmt = insert(peasoup_table).values(params)
+                db_update = conn.execute(stmt)
+                conn.commit()
+                peasoup_id = db_update.inserted_primary_key[0]
+                self.logger.debug(f"Added peasoup parameters to peasoup_params table")
+                if return_id:
+                    return peasoup_id
+            else:
+                peasoup_id = result[0]
+                self.logger.debug(f"Peasoup parameters exist. Skipping...")
+                if return_id:
+                    return peasoup_id
+
+
 
 def main():
     parser = argparse.ArgumentParser(description="Upload data to database from a CSV")
@@ -941,7 +1103,7 @@ def main():
     DB_PORT = os.getenv("DB_PORT")
     DB_USERNAME = os.getenv("DB_USERNAME")
     DB_PASSWORD = os.getenv("DB_PASSWORD")
-    DBNAME = 'testdb'
+    DB_NAME = os.getenv("DB_NAME")
 
     overrides = {}
     if args.ra:
@@ -961,7 +1123,7 @@ def main():
         db_port=DB_PORT,
         db_username=DB_USERNAME,
         db_password=DB_PASSWORD,
-        db_name=DBNAME,
+        db_name=DB_NAME,
         project_name=args.project_name,
         telescope_name=args.telescope_name,
         hardware_name=args.hardware_name,
