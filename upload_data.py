@@ -20,7 +20,70 @@ import subprocess
 from uuid_utils import UUIDUtility
 import ast
 import re
+from collections import OrderedDict
+
 load_dotenv()
+
+class WorkflowJSONBuilder:
+    def __init__(self, pipeline_id, json_db_ids_filename):
+        self.pipeline_id = pipeline_id
+        self.json_db_ids_filename = json_db_ids_filename
+        self.programs = []
+
+    def add_program_entry(self, program_name, program_id, metadata, arguments):
+        # Check if this program entry already exists; if not, create it
+        for p in self.programs:
+            if p['program_name'] == program_name and p['program_id'] == program_id:
+                return p
+        new_prog = {
+            "program_name": program_name,
+            "program_id": program_id,
+            "metadata": metadata,
+            "arguments": arguments,
+            "data_products": []
+        }
+        self.programs.append(new_prog)
+        return new_prog
+
+    def add_data_products_to_program(self, program_id, data_product_list):
+        for p in self.programs:
+            if p['program_id'] == program_id:
+                p['data_products'].extend(data_product_list)
+                return
+
+    def to_dict(self):
+        return {
+            "json_db_ids_filename": self.json_db_ids_filename,
+            "pipeline_id": self.pipeline_id,
+            "programs": self.programs
+        }
+
+    def to_json(self, indent=2, filename=None):
+        # Group programs by program_name while preserving the original order
+        #This is done for aesthetics only.
+        grouped_programs = []
+        seen_program_names = OrderedDict()
+
+        for prog in self.programs:
+            prog_name = prog['program_name']
+            if prog_name not in seen_program_names:
+                seen_program_names[prog_name] = []
+            seen_program_names[prog_name].append(prog)
+
+        for progs in seen_program_names.values():
+            grouped_programs.extend(progs)
+
+        # Create a dictionary with the grouped programs
+        filename = filename if filename else self.json_db_ids_filename
+        data = {
+            "json_db_ids_filename": filename if filename else self.json_db_ids_filename,
+            "pipeline_id": self.pipeline_id,
+            "programs": grouped_programs
+        }
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=indent)
+
+
 
 
 class DatabaseUploader:
@@ -71,7 +134,7 @@ class DatabaseUploader:
         self.hardware_id = self._insert_hardware(self.hardware_name, return_id=True)
 
     
-    def upload_from_csv(self, csv_file):
+    def upload_raw_data(self, csv_file):
         """
         Read the CSV and upload all data products.
         CSV columns:
@@ -120,13 +183,48 @@ class DatabaseUploader:
             receiver_name=pointing_metadata.get('freq_band', None), #For MeerKAT, freq_band is receiver name
             return_id=True
         )
-        print(df)
-        print(df.columns)
+
+        #Insert pipeline
+        repo_name, branch_name, last_commit_id = self._get_repo_details()
+        #Insert pipeline
+        pipeline_id = self._insert_pipeline(
+            nextflow_cfg['pipeline_name'],
+            repo_name,
+            last_commit_id,
+            branch_name,
+            return_id=True
+        )
+
+        # Initialize JSON builder now that we have pipeline_id
+        self.json_builder = WorkflowJSONBuilder(pipeline_id=pipeline_id, json_db_ids_filename=f"{pointing_metadata['target_name']}_pipeline_run.json")
+        #Read docker hashes
+        docker_hash_df = pd.read_csv(self.docker_hash_file)
         
+        #Read filtool parameters
+        filtool_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'filtool', 'pulsarx')
+        
+        filtool_id = self._insert_filtool(
+            filtool_params, 
+            return_id=True)
+
+        # Add filtool to JSON
+        filtool_metadata = {
+            "container_image_name": filtool_params['container_image_name'],
+            "container_image_path": filtool_params['container_image_path'],
+            "container_image_version": filtool_params['container_image_version'],
+            "container_type": filtool_params['container_type']
+        }
+        # Keep only the arguments for filtool
+        filtool_arguments = {k: v for k, v in filtool_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
+        self.json_builder.add_program_entry("filtool", filtool_id, filtool_metadata, filtool_arguments)
+        
+        
+
         for _, row in df.iterrows():
             #Insert beam type
             beam_type_id = self._insert_beam_type(
                 row['beam_type'], return_id=True)
+
             #Insert beam configuration
             beam_config_id = self._insert_beam_config(
                 row['bf_ra'], 
@@ -163,21 +261,20 @@ class DatabaseUploader:
                     self.telescope_id,
                     return_id=True
                 )
-                #Insert beam_antenna linked table
+                #Insert beam_antenna linked table. No need to return ID
                 self._insert_beam_antenna(
                     antenna_id,
-                    beam_id,
-                    return_id=True
+                    beam_id
                 )
             #Insert file type
             file_type_id = self._insert_file_type(
                 beam_metadata['file_ext'],
                 return_id=True
             )
-            
+            dp_id_list = []
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
-                self._insert_data_product(
+                dp_id = self._insert_data_product(
                     beam_id,
                     file_type_id,
                     dp_metadata['filename'],
@@ -197,41 +294,132 @@ class DatabaseUploader:
                     filehash=None,
                     metainfo=None,
                     coherent_dm=row['coherent_dm'] if 'coherent_dm' in row else None,
-                    subband_dm=row['subband_dm'] if 'subband_dm' in row else None
+                    subband_dm=row['subband_dm'] if 'subband_dm' in row else None,
+                    return_id=True
                 )
+                dp_id_list.append(dp_id)
+            
+            #Check if this observation is processed in a different cluster.
+            #Default is Contra, unless user over-rides it in the CSV
+            beam_hardware = row['hardware_name'] if 'hardware_name' in row else 'contra'
+            if beam_hardware.lower() != self.hardware_name.lower():
+                self.logger.debug(f"Beam {row['beam_name']} is processed in a different cluster: {beam_hardware}")
+                beam_hardware_id = self._insert_hardware(beam_hardware, return_id=True)
+            else:
+                beam_hardware_id = self.hardware_id
+            
+            beam_cdm = (row['subband_dm'] if 'subband_dm' in row 
+            else row['coherent_dm'] if 'coherent_dm' in row 
+            else 0.0)
+            data_products_for_filtool = []
+            data_products_for_filtool.append({
+                "pointing_id": pointing_id,
+                "beam_id": beam_id,
+                "hardware": beam_hardware,
+                "hardware_id": beam_hardware_id,
+                "coherent_dm": beam_cdm,
+                "filenames": row['filenames'],
+                "dp_id": dp_id_list
+            })
+            self.json_builder.add_data_products_to_program(filtool_id, data_products_for_filtool)
 
-        #Insert pipeline
-        repo_name, branch_name, last_commit_id = self._get_repo_details()
-        #Insert pipeline
-        pipeline_id = self._insert_pipeline(
-            nextflow_cfg['pipeline_name'],
-            repo_name,
-            last_commit_id,
-            branch_name,
-            return_id=True
-        )
-        docker_hash_df = pd.read_csv(self.docker_hash_file)
-        
+            
 
-        filtool_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'filtool', 'pulsarx')
         
-        filtool_id = self._insert_filtool(
-            filtool_params, 
-            return_id=True)
-        peasoup_args = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df)
-        print(peasoup_args)
+        #Get the full observation tobs and nsamples
+        full_obs_metadata = self._extract_file_header(row['filenames'].split())
+        
+        peasoup_params = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df)
+        
+        # Add each peasoup record as a separate program entry in JSON
+        # peasoup_records is a list of dicts, each representing a peasoup configuration with arguments and peasoup_id
+        for peasoup_record in peasoup_params:
+            peasoup_metadata = {
+                "container_image_name": peasoup_record['container_image_name'],
+                "container_image_path": peasoup_record['container_image_path'],
+                "container_image_version": peasoup_record['container_image_version'],
+                "container_type": peasoup_record['container_type']
+            }
+            #Keep only arguments for peasoup. Extra field of program_id here since this was generated by _store_peasoup_configs
+            arguments = {k: v for k, v in peasoup_record.items() if k not in ['program_name', 'program_id', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
+            self.json_builder.add_program_entry("peasoup", peasoup_record['program_id'], peasoup_metadata, arguments)
+            self.logger.debug(f"Added peasoup program entry: {peasoup_record['program_id']}")
+            #PulsarX arguments depends on peasoup arguments (start_sample, fft_size, nsamples)
+            pulsarx_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pulsarx', 'pulsarx')
+            #If subint is null, set it to tobs/64
+            if pulsarx_params.get('subint_length') == "null":
+                pulsarx_params['subint_length'] = full_obs_metadata['tobs']/64
+            
+            pepoch, start_fraction, end_fraction = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
+            pulsarx_params['pepoch'] = pepoch
+            pulsarx_params['start_frac'] = start_fraction
+            pulsarx_params['end_frac'] = end_fraction
+            pulsarx_id = self._insert_pulsarx(
+                pulsarx_params,
+                return_id=True
+            ) 
+            pulsarx_metadata = {
+                "container_image_name": pulsarx_params['container_image_name'],
+                "container_image_path": pulsarx_params['container_image_path'],
+                "container_image_version": pulsarx_params['container_image_version'],
+                "container_type": pulsarx_params['container_type']
+            }
+            #Keep only arguments for pulsarx
+            pulsarx_arguments = {k: v for k, v in pulsarx_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
+            self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
+               
+
+            
+        
+        #Dump JSON
+        self.json_builder.to_json()
+
+       
+
         
         
 
         sys.exit()
 
-    
+    def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
+        """
+        Calculate pepoch, start_fraction, and end_fraction from observation metadata.
+        start_fraction = start_sample / nsamples
+        end_fraction = (start_sample + fft_size) / nsamples
+
+        pepoch logic:
+        start_time_days = (start_sample * tsamp) / 86400
+        end_time_days   = (fft_size * tsamp) / 86400
+        tstart_updated = tstart_mjd + start_time_days
+        pepoch = tstart_updated + 0.5 * end_time_days
+        """
+        nsamples = full_obs_metadata['nsamples']
+        tsamp = full_obs_metadata['tsamp']
+        tstart_mjd = full_obs_metadata['tstart_mjd']
+
+        #This is used for folding.Round to 3 decimal places
+        start_fraction = round(start_sample / nsamples, 3)
+
+        end_fraction = round((start_sample + fft_size) / nsamples, 3)
+        if end_fraction > 1.0:
+            self.logger.debug(f"End fraction is greater than 1.0. Likely because your padding greater than tobs. Setting it 1.0 for folding.")
+            end_fraction = 1.0
+
+        
+        #pepoch calculation depends on peasoup fft size and not necessarily observation nsamples. You can pad with more samples than tobs.
+        start_time_days = (start_sample * tsamp) / 86400.0
+        end_time_days = (fft_size * tsamp) / 86400.0
+        tstart_updated = tstart_mjd + start_time_days
+        pepoch = tstart_updated + 0.5 * end_time_days
+
+        return pepoch, start_fraction, end_fraction
+
     def _store_peasoup_configs(self, nextflow_cfg, docker_hash_df, df):
         """
         - Reads peasoup configs (JSON string) and dd_plan (colon-sep strings).
         - Matches filterbank rows by coherent DM.
         - Inserts each peasoup configuration into DB.
-        - Returns a JSON dump of all inserted records (including peasoup_id).
+        - Returns a list of dicts with all peasoup configurations and program name and ID.
         """
         # Base container fields for peasoup
         peasoup_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'peasoup', 'peasoup')
@@ -282,16 +470,19 @@ class DatabaseUploader:
                         entry['dm_step']  = float(dm_step)
                         entry['coherent_dm'] = float(coherent_dm)
                         
+                        
                         # Insert into DB, retrieve ID
                         peasoup_id = self._insert_peasoup(entry, return_id=True)
-                        # Mark the inserted ID in entry
-                        entry['peasoup_id'] = peasoup_id
+                        entry['program_name'] = 'peasoup'
+                        entry['program_id'] = peasoup_id
+                        
+                        #json_entry = dict(entry)
+                        #json_entry['data_products'] = []  # no data_products yet
                         # Save this fully resolved entry (with peasoup_id) into our list
                         all_peasoup_records.append(entry)
 
-        # Finally, dump everything to JSON
-        peasoup_json = json.dumps(all_peasoup_records, indent=2)
-        return peasoup_json
+        
+        return all_peasoup_records
                         
     def _parse_nextflow_flat_config_from_file(self, file_path):
 
@@ -328,6 +519,7 @@ class DatabaseUploader:
         program_params.update({
             'program_name': program_name,
             'container_image_name': os.path.basename(params.get(f"apptainer_images.{image_key}", "")),
+            'container_image_path': os.path.dirname(params.get(f"apptainer_images.{image_key}", "")),
             'container_image_id': docker_image_hashes.loc[docker_image_hashes['Image'] == image_key, 'SHA256'].values[0],
             'container_image_version': docker_image_hashes.loc[docker_image_hashes['Image'] == image_key, 'Version'].values[0],
             'container_type': "apptainer"
@@ -890,7 +1082,7 @@ class DatabaseUploader:
 
     def _insert_data_product(self, beam_id, file_type_id, filename, filepath, available, locked, utc_start,
                              tsamp_seconds, tobs_seconds, nsamples, freq_start_mhz, freq_end_mhz, hardware_id,
-                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, subband_dm=None, fft_size=None, mjd_start=None, created_by_processing_id=None):
+                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, subband_dm=None, fft_size=None, mjd_start=None, created_by_processing_id=None, return_id=False):
         table = self._get_table("data_product")
         with self.engine.connect() as conn:
             stmt = (
@@ -934,8 +1126,12 @@ class DatabaseUploader:
                 conn.execute(stmt)
                 conn.commit()
                 self.logger.debug(f"Added data product {filename} to data_product table")
+                if return_id:
+                    return UUIDUtility.convert_binary_uuid_to_string(new_id)
             else:
                 self.logger.debug(f"Data product {filename} exists. Skipping...")
+                if return_id:
+                    return UUIDUtility.convert_binary_uuid_to_string(res[0])
     
     def _generate_argument_hash(self, params, keys_to_include):
 
@@ -994,7 +1190,7 @@ class DatabaseUploader:
         argument_hash = self._generate_argument_hash(params, filtool_keys)
         container_image_id = params['container_image_id']
         #Below are the keys that are not in the database, but are required for nextflow
-        keys_to_exclude = ['get_metadata', 'program_name']
+        keys_to_exclude = ['get_metadata', 'program_name', 'container_image_path']
 
         # Handle default values and None conversions
         defaults = {
@@ -1052,7 +1248,7 @@ class DatabaseUploader:
         ]
         argument_hash = self._generate_argument_hash(params, peasoup_keys)
         params['argument_hash'] = argument_hash
-        keys_to_exclude = ['program_name']
+        keys_to_exclude = ['program_name', 'container_image_path']
         with self.engine.connect() as conn:
             stmt = (
             select(peasoup_table)
@@ -1075,6 +1271,36 @@ class DatabaseUploader:
                 self.logger.debug(f"Peasoup parameters exist. Skipping...")
                 if return_id:
                     return peasoup_id
+
+    def _insert_pulsarx(self, params, return_id=False):
+        pulsarx_table = self._get_table("pulsarx")
+        #Define keys for argument_hash if needed
+        keys_for_hash = ['pepoch','nsubband','subint_length','start_frac','end_frac','clfd_q_value','fast_nbins','slow_nbins','rfi_filter','threads','extra_args']
+        argument_hash = self._generate_argument_hash(params, keys_for_hash)
+        params['argument_hash'] = argument_hash
+        keys_to_exclude = ['program_name','fold_template','container_image_id','container_image_name','container_image_version','container_type', 'container_image_path']
+
+        with self.engine.connect() as conn:
+            stmt = (
+                select(pulsarx_table)
+                .where(pulsarx_table.c.argument_hash == argument_hash)
+                .limit(1)
+            )
+            result = conn.execute(stmt).first()
+            if result is None:
+                params_insert = {k: v for k, v in params.items() if k not in keys_to_exclude}
+                stmt = insert(pulsarx_table).values(params_insert)
+                db_update = conn.execute(stmt)
+                conn.commit()
+                pulsarx_id = db_update.inserted_primary_key[0]
+                self.logger.debug(f"Added pulsarx parameters to pulsarx_params table")
+                if return_id:
+                    return pulsarx_id
+            else:
+                pulsarx_id = result[0]
+                self.logger.debug(f"PulsarX parameters exist. Skipping...")
+                if return_id:
+                    return pulsarx_id
 
 
 
@@ -1135,7 +1361,7 @@ def main():
         overrides=overrides
     )
 
-    uploader.upload_from_csv(args.csv_file)
+    uploader.upload_raw_data(args.csv_file)
 
 if __name__ == "__main__":
     main()
