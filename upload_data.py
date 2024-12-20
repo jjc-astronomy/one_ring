@@ -272,6 +272,7 @@ class DatabaseUploader:
                 return_id=True
             )
             dp_id_list = []
+            processing_dp_id_list = []
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
                 dp_id = self._insert_data_product(
@@ -298,6 +299,8 @@ class DatabaseUploader:
                     return_id=True
                 )
                 dp_id_list.append(dp_id)
+                #Generate UUID string for Processing data products linked table
+                processing_dp_id_list.append(UUIDUtility.generate_uuid_string())
             
             #Check if this observation is processed in a different cluster.
             #Default is Contra, unless user over-rides it in the CSV
@@ -313,13 +316,16 @@ class DatabaseUploader:
             else 0.0)
             data_products_for_filtool = []
             data_products_for_filtool.append({
+                "target_name": pointing_metadata['target_name'],
                 "pointing_id": pointing_id,
+                "beam_name": row['beam_name'],
                 "beam_id": beam_id,
                 "hardware": beam_hardware,
                 "hardware_id": beam_hardware_id,
                 "coherent_dm": beam_cdm,
                 "filenames": row['filenames'],
-                "dp_id": dp_id_list
+                "dp_id": dp_id_list,
+                "processing_dp_id": processing_dp_id_list
             })
             self.json_builder.add_data_products_to_program(filtool_id, data_products_for_filtool)
 
@@ -368,19 +374,10 @@ class DatabaseUploader:
             pulsarx_arguments = {k: v for k, v in pulsarx_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
             self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
                
-
-            
-        
         #Dump JSON
         self.json_builder.to_json()
 
-       
-
-        
-        
-
-        sys.exit()
-
+    
     def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
         """
         Calculate pepoch, start_fraction, and end_fraction from observation metadata.

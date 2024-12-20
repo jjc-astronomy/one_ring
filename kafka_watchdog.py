@@ -11,7 +11,7 @@ from confluent_kafka import Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import SerializationContext, MessageField
-import uuid_utils
+from uuid_utils import UUIDUtility
 import csv
 import pandas as pd
 from typing import List, Optional, Dict
@@ -193,7 +193,7 @@ class KafkaProducer:
         for field in binary_fields:
             if field in row and row[field] is not None:
                 try:
-                    row[field] = uuid_utils.convert_uuid_string_to_binary(row[field])
+                    row[field] = UUIDUtility.convert_uuid_string_to_binary(row[field])
                 except ValueError as e:
                     raise ValueError(f"Error converting {field} to binary. Invalid UUID: {row[field]}. Error: {str(e)}")
 
@@ -312,9 +312,9 @@ class DataProductInputHandler:
         process_input_dp_id = process_input_dp_id.split()
         data_product_ids = input_dp_id.split()
         for process_input_dp_id, dp_id in zip(process_input_dp_id, data_product_ids):
-            new_id = uuid_utils.convert_uuid_string_to_binary(process_input_dp_id)
-            processing_uuid = uuid_utils.convert_uuid_string_to_binary(processing_id)
-            dp_uuid = uuid_utils.convert_uuid_string_to_binary(dp_id)
+            new_id = UUIDUtility.convert_uuid_string_to_binary(process_input_dp_id)
+            processing_uuid = UUIDUtility.convert_uuid_string_to_binary(processing_id)
+            dp_uuid = UUIDUtility.convert_uuid_string_to_binary(dp_id)
             message = {
                 'id': new_id,
                 'dp_id': dp_uuid,
@@ -426,7 +426,7 @@ class DataProductOutputHandler:
         df = self.get_xml_cands(xml_file)
         for index, row in df.iterrows():
             message = {}
-            message['id'] = uuid_utils.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
+            message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
             message['spin_period'] = row['period']
             message['dm'] = row['dm']
             message['pdot'] = a_to_pdot(row['period'], row['acc'])
@@ -450,14 +450,14 @@ class DataProductOutputHandler:
 
         for index, row in results.iterrows():
             message = {}
-            message['id'] = uuid_utils.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
+            message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
             f, fdot, p, pdot = calculate_spin(f=row['f0_new'], fdot=row['f1_new'])
             message['spin_period'] = p
             message['dm'] = row['dm_new']
             message['pdot'] = pdot
             message['fold_snr'] = row['S/N_new']
-            message['search_candidate_id'] = uuid_utils.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
-            message['dp_id'] = uuid_utils.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
+            message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
+            message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
             
             #Send to kafka
             self.kafka_producer_fold_candidate.produce_message(self.fold_cand_topic, message)
@@ -473,13 +473,13 @@ class DataProductOutputHandler:
         for index, row in results.iterrows():
 
             message = {}
-            message['id'] = uuid_utils.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
+            message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
             message['spin_period'] = row['p0_new']
             message['dm'] = row['dm_new']
             message['pdot'] = row['p1_new']
             message['fold_snr'] = row['S/N_new']
-            message['search_candidate_id'] = uuid_utils.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
-            message['dp_id'] = uuid_utils.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
+            message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
+            message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
            
             #Send to kafka
             self.kafka_producer_fold_candidate.produce_message(self.fold_cand_topic, message)
@@ -506,8 +506,8 @@ class DataProductOutputHandler:
 
         for dp_id, filename in zip(data_product_ids, filenames):
             
-            processing_uuid = uuid_utils.convert_uuid_string_to_binary(processing_id)
-            dp_uuid = uuid_utils.convert_uuid_string_to_binary(dp_id)
+            processing_uuid = UUIDUtility.convert_uuid_string_to_binary(processing_id)
+            dp_uuid = UUIDUtility.convert_uuid_string_to_binary(dp_id)
             filepath = workdir
             basename = os.path.basename(filename)
             file_extension = os.path.splitext(filename)[1].lstrip('.')
@@ -543,7 +543,6 @@ class DataProductOutputHandler:
             # Check if 'fft_size' exists and convert to int if it does
             if 'fft_size' in message and message['fft_size'] is not None:
                 message['fft_size'] = int(message['fft_size'])
-            
             if 'nsamples' in message and message['nsamples'] is not None:
                 message['nsamples'] = int(message['nsamples'])
                         
@@ -615,6 +614,7 @@ class JsonFileProcessor(FileSystemEventHandler):
             
             if item['status'] == 'COMPLETED':
                 filtered_data_dp_outputs = DataProductOutputHandler.filter_and_rename(item)
+                
                 self.dp_outputs_handler.send_data_product_outputs(
                     taskname = filtered_data_processing['task_name'],
                     workdir = filtered_data_dp_outputs['workdir'],

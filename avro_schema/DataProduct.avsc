@@ -111,7 +111,7 @@
       "default": null
     },
     {
-      "name": "incoherent_dm",
+      "name": "subband_dm",
       "type": ["null", "int"],
       "default": null
     }

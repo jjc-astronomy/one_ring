@@ -227,6 +227,7 @@ process kafka_prepfold {
 process filtool {
     label 'filtool'
     container "${params.fold_singularity_image}"
+    
     //scratch "${params.tmp_dir}"
 
     input:
