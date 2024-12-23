@@ -1,6 +1,6 @@
 import argparse
 import xml.etree.ElementTree as ET
-import uuid_utils
+from uuid_utils import UUIDUtility
 
 def process_xml_file(input_file, output_file):
     # Parse the XML file
@@ -10,7 +10,7 @@ def process_xml_file(input_file, output_file):
 
     # Process each candidate and add a database_uuid
     for candidate in candidates.findall("candidate"):
-        uuid_str = uuid_utils.generate_uuid_string()
+        uuid_str = UUIDUtility.generate_uuid_string()
         uuid_element = ET.Element("search_candidates_database_uuid")
         uuid_element.text = uuid_str
         candidate.append(uuid_element)

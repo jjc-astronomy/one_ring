@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from time import sleep
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 from confluent_kafka import Producer
 from confluent_kafka.schema_registry import SchemaRegistryClient
@@ -338,12 +339,13 @@ class DataProductOutputHandler:
                     'filepath', 'filehash', 'available', 'metainfo', \
                     'locked', 'utc_start', 'tsamp', 'tobs', 'nsamples', \
                     'freq_start_mhz', 'freq_end_mhz',  'created_by_processing_id', \
-                    'hardware_id', 'tstart', 'fft_size', 'nchans', 'nbits', 'foff', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged']
+                    'hardware_id', 'mjd_start', 'fft_size', 'nchans', 'nbits', 'foff', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged', 'coherent_dm']
     
     rename_columns = {
         'output_dp_id': 'id',
         'output_dp': 'filename',
         'process_uuid': 'created_by_processing_id',
+        'tstart': 'mjd_start',
         'tstart_utc': 'utc_start',
         'status': 'process_status',
     }
@@ -396,14 +398,13 @@ class DataProductOutputHandler:
         root = tree.getroot()
         header_params = root[1]
         search_params = root[2]
-        candidates = root[6]
+        segment_params = root[3]
+        candidates = root[7]
 
-        filterbank_file = str(search_params.find("infilename").text)
-        tsamp = float(header_params.find("tsamp").text)
-        fft_size = int(search_params.find("size").text)
-        nsamples = int(root.find("header_parameters/nsamples").text)
-        tstart = float(header_params.find("tstart").text)
-        source_name_prefix = str(header_params.find("source_name").text).strip()
+        segment_start_sample = int(segment_params.find('segment_start_sample').text)
+        segment_nsamples = int(segment_params.find('segment_nsamples').text)
+        segment_pepoch = float(segment_params.find('segment_pepoch').text)
+
         
         ignored_entries = ['candidate', 'opt_period', 'folded_snr', 'byte_offset', 'is_adjacent', 'is_physical']
         rows = []
@@ -413,10 +414,13 @@ class DataProductOutputHandler:
                 if not cand_entry.tag in ignored_entries:
                     cand_dict[cand_entry.tag] = cand_entry.text
             cand_dict['cand_id_in_file'] = candidate.attrib.get("id")
+            cand_dict['segment_start_sample'] = segment_start_sample
+            cand_dict['segment_nsamples'] = segment_nsamples
+            cand_dict['segment_pepoch'] = segment_pepoch
             rows.append(cand_dict)
 
         df = pd.DataFrame(rows)
-        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int})
+        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float})
 
         return df
 
@@ -424,6 +428,7 @@ class DataProductOutputHandler:
     def xml_to_kafka_producer(self, xml_file, beam_id, hardware_id, processing_id, dp_id):
 
         df = self.get_xml_cands(xml_file)
+    
         for index, row in df.iterrows():
             message = {}
             message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
@@ -439,6 +444,9 @@ class DataProductOutputHandler:
             message['nh'] = int(row['nh'])
             message['dp_id'] = dp_id
             message['candidate_id_in_file'] = int(row['cand_id_in_file'])
+            message['segment_start_sample'] = int(row['segment_start_sample'])
+            message['segment_nsamples'] = int(row['segment_nsamples'])
+            message['segment_pepoch'] = float(row['segment_pepoch'])
            
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
     
@@ -535,19 +543,19 @@ class DataProductOutputHandler:
                 'filehash': optional_fields.get('filehash'),
                 'metainfo': optional_fields.get('metainfo'),
                 'utc_start': optional_fields.get('utc_start'),
-                'tstart': optional_fields.get('tstart'),
+                'mjd_start': optional_fields.get('mjd_start'),
                 'fft_size': optional_fields.get('fft_size'),
-                'foff': optional_fields.get('foff')
+                'nchans': optional_fields.get('nchans'),
+                'nbits': optional_fields.get('nbits')
             }
 
-            # Check if 'fft_size' exists and convert to int if it does
-            if 'fft_size' in message and message['fft_size'] is not None:
-                message['fft_size'] = int(message['fft_size'])
-            if 'nsamples' in message and message['nsamples'] is not None:
-                message['nsamples'] = int(message['nsamples'])
+            for key in ('fft_size', 'nsamples', 'nchans', 'nbits'):
+                if message.get(key) is not None:
+                    message[key] = int(message[key])
+
                         
             message = {k: v for k, v in message.items() if v is not None}
-            
+           
             self.kafka_producer_dp_output.produce_message(self.dp_output_topic, message)
             #If its an xml file, then we need to send the search candidate to the search candidate topic
             if file_extension == 'xml':
@@ -582,9 +590,10 @@ class JsonFileProcessor(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.json'):
             return
-        sleep(2)
+        logging.info(f"New file detected: {event.src_path}")
+        sleep(4)  # Ensure the file is fully written
         self.process_json(event.src_path)
-
+       
     def process_json(self, file_path):
         try:
             with open(file_path, 'r') as file:
@@ -634,9 +643,10 @@ class JsonFileProcessor(FileSystemEventHandler):
                     locked = filtered_data_dp_outputs.get('locked'),
                     metainfo = filtered_data_dp_outputs.get('metainfo'),
                     utc_start = filtered_data_dp_outputs.get('utc_start'),
-                    tstart = filtered_data_dp_outputs.get('tstart'),
+                    mjd_start = filtered_data_dp_outputs.get('mjd_start'),
                     fft_size = filtered_data_dp_outputs.get('fft_size'),
-                    foff = filtered_data_dp_outputs.get('foff'),
+                    nchans = filtered_data_dp_outputs.get('nchans'),
+                    nbits = filtered_data_dp_outputs.get('nbits'),
                     search_fold_merged = filtered_data_dp_outputs.get('search_fold_merged')
                 )
 
@@ -709,7 +719,8 @@ def main(config):
                 event_handler.process_json(file_path)
                 sleep(2)
 
-    observer = Observer()
+    #observer = Observer()
+    observer = PollingObserver()
     observer.schedule(event_handler, directory, recursive=False)
     observer.start()
 

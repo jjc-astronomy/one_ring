@@ -96,6 +96,22 @@
       "name": "candidate_id_in_file",
       "type": ["null", "int"],
       "default": null
+    },
+     {
+      "name": "segment_start_sample",
+      "type": ["null", "long"],
+      "default": null
+    },
+     {
+      "name": "segment_nsamples",
+      "type": ["null", "long"],
+      "default": null
+    },
+     {
+      "name": "segment_pepoch",
+      "type": ["null", "float"],
+      "default": null
     }
+    
   ]
 }

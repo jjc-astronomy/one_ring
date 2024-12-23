@@ -3,7 +3,7 @@
 # Define images and their versions
 declare -A IMAGES
 IMAGES["vishnubk/compact_sql"]="latest"
-IMAGES["vishnubk/peasoup"]="latest"
+IMAGES["vishnubk/peasoup"]="sm89"
 IMAGES["vishnubk/pulsar-miner"]="turing-sm75"
 IMAGES["vishnubk/pulsarx"]="latest"
 

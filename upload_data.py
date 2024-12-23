@@ -460,6 +460,7 @@ class DatabaseUploader:
                         entry['chan_mask']        = peasoup_cfg['chan_mask']
                         entry['nsamples']         = int(peasoup_cfg['nsamples']) if peasoup_cfg['nsamples'] is not None else None
                         entry['start_sample']     = int(peasoup_cfg['start_sample']) if peasoup_cfg['start_sample'] is not None else None
+                        entry['extra_args']       = peasoup_cfg['extra_args']
 
                         # dd_plan info
                         entry['dm_start'] = float(start_dm)
