@@ -4,8 +4,17 @@
   "name": "Processing",
   "fields": [
     {
-      "name": "id",
-      "type": "bytes"
+      "name": "session_id",
+      "type": "string"
+    },
+    {
+      "name": "task_id",
+      "type": "int"
+    },
+    {
+      "name": "run_name",
+      "type": ["null", "string"],
+      "default": null
     },
     {
       "name": "pipeline_id",
@@ -45,6 +54,11 @@
     {
       "name": "max_attempts",
       "type": ["null", "int"],
+      "default": null
+    },
+    {
+      "name": "workdir",
+      "type": ["null", "string"],
       "default": null
     },
     {

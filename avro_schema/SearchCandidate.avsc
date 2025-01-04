@@ -109,7 +109,7 @@
     },
      {
       "name": "segment_pepoch",
-      "type": ["null", "float"],
+      "type": ["null", "double"],
       "default": null
     }
     

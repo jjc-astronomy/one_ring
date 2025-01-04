@@ -29,7 +29,7 @@ def get_xml_cands(xml_file):
     root = tree.getroot()
     header_params = root[1]
     search_params = root[2]
-    candidates = root[6]
+    candidates = root[7]
 
     filterbank_file = str(search_params.find("infilename").text)
     tsamp = float(header_params.find("tsamp").text)

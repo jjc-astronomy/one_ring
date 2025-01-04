@@ -218,8 +218,6 @@ class DatabaseUploader:
         filtool_arguments = {k: v for k, v in filtool_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
         self.json_builder.add_program_entry("filtool", filtool_id, filtool_metadata, filtool_arguments)
         
-        
-
         for _, row in df.iterrows():
             #Insert beam type
             beam_type_id = self._insert_beam_type(
@@ -272,7 +270,7 @@ class DatabaseUploader:
                 return_id=True
             )
             dp_id_list = []
-            processing_dp_id_list = []
+            
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
                 dp_id = self._insert_data_product(
@@ -299,9 +297,7 @@ class DatabaseUploader:
                     return_id=True
                 )
                 dp_id_list.append(dp_id)
-                #Generate UUID string for Processing data products linked table
-                processing_dp_id_list.append(UUIDUtility.generate_uuid_string())
-            
+                
             #Check if this observation is processed in a different cluster.
             #Default is Contra, unless user over-rides it in the CSV
             beam_hardware = row['hardware_name'] if 'hardware_name' in row else 'contra'
@@ -317,6 +313,7 @@ class DatabaseUploader:
             data_products_for_filtool = []
             data_products_for_filtool.append({
                 "target_name": pointing_metadata['target_name'],
+                "utc_start": pointing_metadata['utc_start'].split('.')[0] if '.' in pointing_metadata['utc_start'] else pointing_metadata['utc_start'],
                 "pointing_id": pointing_id,
                 "beam_name": row['beam_name'],
                 "beam_id": beam_id,
@@ -324,8 +321,7 @@ class DatabaseUploader:
                 "hardware_id": beam_hardware_id,
                 "coherent_dm": beam_cdm,
                 "filenames": row['filenames'],
-                "dp_id": dp_id_list,
-                "processing_dp_id": processing_dp_id_list
+                "dp_id": dp_id_list
             })
             self.json_builder.add_data_products_to_program(filtool_id, data_products_for_filtool)
 
@@ -350,26 +346,36 @@ class DatabaseUploader:
             arguments = {k: v for k, v in peasoup_record.items() if k not in ['program_name', 'program_id', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
             self.json_builder.add_program_entry("peasoup", peasoup_record['program_id'], peasoup_metadata, arguments)
             self.logger.debug(f"Added peasoup program entry: {peasoup_record['program_id']}")
-            #PulsarX arguments depends on peasoup arguments (start_sample, fft_size, nsamples)
+            '''
+            PulsarX arguments depends on peasoup arguments (start_sample, fft_size, nsamples, pepoch). So we generate it in the loop.
+            They are are matched in the nextflow pipeline based on pepoch.
+            '''
             pulsarx_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pulsarx', 'pulsarx')
-            #If subint is null, set it to tobs/64
-            if pulsarx_params.get('subint_length') == "null":
-                pulsarx_params['subint_length'] = full_obs_metadata['tobs']/64
             
-            pepoch, start_fraction, end_fraction = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
+            #Calculate pepoch, start_fraction, end_fraction, and effective tobs
+            pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
+           
+            
+            #If subint is null, set it to effective tobs/64
+            if pulsarx_params.get('subint_length') == "null":
+                pulsarx_params['subint_length'] = int(effective_tobs/64)
+                
             pulsarx_params['pepoch'] = pepoch
             pulsarx_params['start_frac'] = start_fraction
             pulsarx_params['end_frac'] = end_fraction
-            pulsarx_id = self._insert_pulsarx(
-                pulsarx_params,
-                return_id=True
-            ) 
+            pulsarx_params['template_path'] = os.path.dirname(pulsarx_params['template_file'])
+            pulsarx_params['template_file'] = os.path.basename(pulsarx_params['template_file'])
+            
             pulsarx_metadata = {
                 "container_image_name": pulsarx_params['container_image_name'],
                 "container_image_path": pulsarx_params['container_image_path'],
                 "container_image_version": pulsarx_params['container_image_version'],
                 "container_type": pulsarx_params['container_type']
             }
+            pulsarx_id = self._insert_pulsarx(
+                pulsarx_params,
+                return_id=True
+            ) 
             #Keep only arguments for pulsarx
             pulsarx_arguments = {k: v for k, v in pulsarx_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
             self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
@@ -407,9 +413,10 @@ class DatabaseUploader:
         start_time_days = (start_sample * tsamp) / 86400.0
         end_time_days = (fft_size * tsamp) / 86400.0
         tstart_updated = tstart_mjd + start_time_days
-        pepoch = tstart_updated + 0.5 * end_time_days
+        pepoch = round(tstart_updated + 0.5 * end_time_days, 6)
+        effective_tobs = (end_fraction - start_fraction) * full_obs_metadata['tobs']
 
-        return pepoch, start_fraction, end_fraction
+        return pepoch, start_fraction, end_fraction, effective_tobs
 
     def _store_peasoup_configs(self, nextflow_cfg, docker_hash_df, df):
         """
@@ -473,6 +480,7 @@ class DatabaseUploader:
                         peasoup_id = self._insert_peasoup(entry, return_id=True)
                         entry['program_name'] = 'peasoup'
                         entry['program_id'] = peasoup_id
+                        entry['cfg_name'] = peasoup_cfg['cfg_name']
                         
                         #json_entry = dict(entry)
                         #json_entry['data_products'] = []  # no data_products yet
@@ -1080,7 +1088,7 @@ class DatabaseUploader:
 
     def _insert_data_product(self, beam_id, file_type_id, filename, filepath, available, locked, utc_start,
                              tsamp_seconds, tobs_seconds, nsamples, freq_start_mhz, freq_end_mhz, hardware_id,
-                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, subband_dm=None, fft_size=None, mjd_start=None, created_by_processing_id=None, return_id=False):
+                             nchans, nbits, filehash=None, metainfo=None, coherent_dm=None, subband_dm=None, fft_size=None, mjd_start=None, created_by_session_id=None, created_by_task_id=None, return_id=False):
         table = self._get_table("data_product")
         with self.engine.connect() as conn:
             stmt = (
@@ -1111,7 +1119,8 @@ class DatabaseUploader:
                     nsamples=nsamples,
                     freq_start_mhz=freq_start_mhz,
                     freq_end_mhz=freq_end_mhz,
-                    created_by_processing_id=created_by_processing_id,
+                    created_by_session_id=created_by_session_id,
+                    created_by_task_id=created_by_task_id,
                     hardware_id=hardware_id,
                     fft_size=fft_size,
                     nchans=nchans,
@@ -1276,7 +1285,7 @@ class DatabaseUploader:
         keys_for_hash = ['pepoch','nsubband','subint_length','start_frac','end_frac','clfd_q_value','fast_nbins','slow_nbins','rfi_filter','threads','extra_args']
         argument_hash = self._generate_argument_hash(params, keys_for_hash)
         params['argument_hash'] = argument_hash
-        keys_to_exclude = ['program_name','fold_template','container_image_id','container_image_name','container_image_version','container_type', 'container_image_path']
+        keys_to_exclude = ['program_name','container_image_path']
 
         with self.engine.connect() as conn:
             stmt = (

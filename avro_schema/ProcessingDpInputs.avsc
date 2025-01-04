@@ -4,18 +4,16 @@
   "name": "ProcessingDpInputs",
   "fields": [
     {
-      "name": "id",
-      "type": "bytes"
-    },
-    {
       "name": "dp_id",
-      "type": ["null", "bytes"],
-      "default": null
+      "type":  "bytes"
     },
     {
-      "name": "processing_id",
-      "type": ["null", "bytes"],
-      "default": null
+      "name": "session_id",
+      "type": "string"
+    },
+    {
+      "name": "task_id",
+      "type": "int"
     }
   ]
 }

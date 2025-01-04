@@ -9,6 +9,7 @@ core*
 *.fil
 *.html
 .bdm*
+**/*.bdm
 .nextflow*
 secrets.config
 Thoughts.txt

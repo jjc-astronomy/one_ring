@@ -8,27 +8,42 @@
       "type": "int"
     },
     {
-      "name": "subbands_number",
+      "name": "pepoch",
+      "type": ["null", "double"],
+      "default": null
+    },
+    {
+      "name": "nsubband",
       "type": ["null", "int"],
       "default": null
     },
     {
       "name": "subint_length",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "start_frac",
+      "type": ["null", "double"],
+      "default": null
+    },
+    {
+      "name": "end_frac",
+      "type": ["null", "double"],
       "default": null
     },
     {
       "name": "clfd_q_value",
-      "type": ["null", "string"],
+      "type": ["null", "float"],
       "default": null
     },
     {
-      "name": "fast_nbins",
+      "name": "nbins_low",
       "type": ["null", "int"],
       "default": null
     },
     {
-      "name": "slow_nbins",
+      "name": "nbins_high",
       "type": ["null", "int"],
       "default": null
     },
@@ -38,7 +53,27 @@
       "default": null
     },
     {
+      "name": "template_path",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "template_file",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "threads",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
       "name": "extra_args",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "argument_hash",
       "type": ["null", "string"],
       "default": null
     },
@@ -53,22 +88,12 @@
       "default": null
     },
     {
-      "name": "container_type",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "threads",
-      "type": ["null", "int"],
-      "default": null
-    },
-    {
-      "name": "argument_hash",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
       "name": "container_image_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "container_type",
       "type": ["null", "string"],
       "default": null
     }

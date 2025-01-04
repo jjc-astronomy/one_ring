@@ -76,8 +76,13 @@
       "default": null
     },
     {
-      "name": "created_by_processing_id",
-      "type": ["null", "bytes"],
+      "name": "created_by_session_id",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "created_by_task_id",
+      "type": ["null", "int"],
       "default": null
     },
     {
@@ -107,12 +112,12 @@
     },
     {
       "name": "coherent_dm",
-      "type": ["null", "int"],
+      "type": ["null", "string"],
       "default": null
     },
     {
       "name": "subband_dm",
-      "type": ["null", "int"],
+      "type": ["null", "string"],
       "default": null
     }
   ]

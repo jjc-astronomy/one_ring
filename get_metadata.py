@@ -2,6 +2,7 @@ import your
 import argparse
 import os
 import sys
+from datetime import datetime
 
 
 def get_metadata_of_file(data):
@@ -20,11 +21,15 @@ def get_metadata_of_file(data):
     bandwidth = header.bw
     lowest_freq = central_freq - bandwidth/2
     highest_freq = central_freq + bandwidth/2
+    # Format tstart_utc to remove fractional seconds
+    tstart_utc = header.tstart_utc.replace("T", "-")
+    tstart_utc_no_fraction = datetime.strptime(tstart_utc.split(".")[0], "%Y-%m-%d-%H:%M:%S").strftime("%Y-%m-%d-%H:%M:%S")
+
 
     metadata = {
         "filename": os.path.basename(header.filename),
         "filepath": os.path.dirname(header.filename),
-        "tstart_utc": header.tstart_utc.replace("T", "-"),
+        "tstart_utc": tstart_utc_no_fraction,
         "tsamp": header.tsamp,
         "tobs": header.tsamp * header.nspectra,
         "nsamples": header.nspectra,
