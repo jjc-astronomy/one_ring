@@ -11,4 +11,6 @@ search_cand_topic: "search_candidate"
 search_cand_schema_file: "avro_schema/SearchCandidate.avsc"
 fold_cand_topic: "fold_candidate"
 fold_cand_schema_file: "avro_schema/FoldCandidate.avsc"
+candidate_tracker_topic: "candidate_tracker"
+candidate_tracker_schema_file: "avro_schema/CandidateTracker.avsc"
 read_existing: true

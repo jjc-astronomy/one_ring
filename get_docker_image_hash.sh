@@ -6,6 +6,8 @@ IMAGES["vishnubk/compact_sql"]="latest"
 IMAGES["vishnubk/peasoup"]="sm89"
 IMAGES["vishnubk/pulsar-miner"]="turing-sm75"
 IMAGES["vishnubk/pulsarx"]="latest"
+IMAGES["vishnubk/pics"]="20230630_pics_model_update"
+IMAGES["vishnubk/mmgps_candidate_filter"]="20230821-rfi-filter-snr-thresh"
 
 #apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
 # Output file

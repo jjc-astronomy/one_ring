@@ -55,15 +55,17 @@ def buffered_stream_output(pipe, logger, log_level=logging.INFO, flush_interval=
 
     finally:
         pipe.close()
+
 ###############################################################################
 # Immediate Stream Output
+###############################################################################
+
 def immediate_stream_output(pipe, logger, log_level=logging.INFO):
     try:
         for line in iter(pipe.readline, ''):
             logger.log(log_level, line.rstrip('\n'))
     finally:
         pipe.close()
-###############################################################################
 
 ###############################################################################
 # PulsarX Candidate File
@@ -97,19 +99,29 @@ def a_to_pdot(P_s, acc_ms2):
 ###############################################################################
 
 def run_prepfold(args):
-    row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask = args
+    """
+    args is a tuple:
+      (row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask, extra_args)
+    """
+    row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask, extra_args = args
     fold_period, pdot, cand_id, dm = row
     output_filename = source_name_prefix + '_Peasoup_fold_candidate_id_' + str(int(cand_id) + 1)
 
     cmd = "prepfold -fixchi -noxwin -topo"
-    
+
+    # Slow search if period > 0.1s
     if fold_period > 0.1:
         cmd += " -slow"
-    
-    if rfifind_mask:
-        cmd += " -mask %s" % rfifind_mask
 
+    if rfifind_mask:
+        cmd += f" -mask {rfifind_mask}"
+
+    # Add the fundamental folding parameters
     cmd += " -p %.16f -dm %.2f -pd %.16f -o %s %s" % (fold_period, dm, pdot, output_filename, filterbank_file)
+
+    # Append extra_args if provided
+    if extra_args:
+        cmd += f" {extra_args}"
 
     try:
         logging.debug(f"Running Presto command: {cmd}")
@@ -118,7 +130,8 @@ def run_prepfold(args):
     except subprocess.CalledProcessError as e:
         return (False, cand_id, str(e))
 
-def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, prepfold_threads, rfifind_mask=None):
+def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix,
+                     prepfold_threads, rfifind_mask=None, extra_args=None):
     num_cores = min(prepfold_threads, len(df))
 
     period = df['period'].values
@@ -127,7 +140,10 @@ def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, p
     fold_period = period_correction_for_prepfold(period, pdot, tsamp, fft_size)
 
     merged_data = np.column_stack((fold_period, pdot, df['cand_id_in_file'].values, df['dm'].values))
-    args_list = [(row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask) for row in merged_data]
+    args_list = [
+        (row, filterbank_file, tsamp, fft_size, source_name_prefix, rfifind_mask, extra_args)
+        for row in merged_data
+    ]
 
     pool = Pool(num_cores)
     results = pool.map(run_prepfold, args_list)
@@ -142,11 +158,18 @@ def fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, p
 # Folding with PulsarX
 ###############################################################################
 
-def fold_with_pulsarx(df, segment_start_sample, segment_nsamples, segment_pepoch,
-                      total_nsamples, input_filenames, source_name_prefix,
-                      nbins_high, nbins_low, subint_length, nsubband, utc_beam,
-                      beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
-                      rfi_filter, cmask=None):
+def fold_with_pulsarx(
+    df, segment_start_sample, segment_nsamples, pepoch,
+    total_nsamples, input_filenames, source_name_prefix,
+    nbins_high, nbins_low, subint_length, nsubband, utc_beam,
+    beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
+    rfi_filter, cmask=None, start_fraction=None, end_fraction=None,
+    extra_args=None
+):
+    """
+    Fold candidates with pulsarx (psrfold_fil). 
+    'pepoch', 'start_fraction', and 'end_fraction' are either user-provided or derived.
+    """
 
     cand_dms = df['dm'].values
     cand_accs = df['acc'].values
@@ -180,19 +203,32 @@ def fold_with_pulsarx(df, segment_start_sample, segment_nsamples, segment_pepoch
     else:
         additional_flags = ""
 
-    start_fraction = round(segment_start_sample / total_nsamples, 3)
-    end_fraction = round((segment_start_sample + segment_nsamples) / total_nsamples, 3)
-
+    # Build the base command
     script = (
         "psrfold_fil -v -t {} --candfile {} -n {} {} {} --template {} "
-        "--clfd {} -L {} -f {} {}-o {} --srcname {} --pepoch {} --frac {} "
-        "{} {}"
+        "--clfd {} -L {} -f {} {} -o {} --srcname {} --pepoch {} --frac {} {} {}"
     ).format(
-        pulsarx_threads, pulsarx_predictor, nsubband, nbins_string, beam_tag, TEMPLATE,
-        clfd_q_value, subint_length, input_filenames, zap_string, output_rootname,
-        source_name_prefix, segment_pepoch, start_fraction, end_fraction,
+        pulsarx_threads,
+        pulsarx_predictor,
+        nsubband,
+        nbins_string,
+        beam_tag,
+        TEMPLATE,
+        clfd_q_value,
+        subint_length,
+        input_filenames,
+        zap_string,
+        output_rootname,
+        source_name_prefix,
+        pepoch,
+        start_fraction,
+        end_fraction,
         additional_flags
     )
+
+    # Append extra_args if provided
+    if extra_args:
+        script += f" {extra_args}"
 
     logging.debug(f"Running PulsarX command: {script}")
 
@@ -240,7 +276,7 @@ def main():
                         type=str)
     parser.add_argument('-m', '--mask_file', help='Mask file for prepfold', type=str)
     parser.add_argument('-t', '--fold_technique', help='Technique to use for folding (presto or pulsarx)',
-                        type=str, default='presto')
+                        type=str, default='pulsarx')
     parser.add_argument('-n', '--nh', help='Filter candidates with nh value',
                         type=int, default=0)
     parser.add_argument('-u', '--nbins_high', help='Upper profile bin limit for slow-spinning pulsars',
@@ -270,6 +306,16 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose (DEBUG) logging')
 
+    # New arguments for pepoch, start_frac, end_frac overrides, and extra arguments
+    parser.add_argument('--pepoch_override', type=float, default=None,
+                        help='Override Pepoch value. If not provided, read from XML.')
+    parser.add_argument('--start_frac', type=float, default=None,
+                        help='Override start fraction [0..1]. If not provided, computed from XML data.')
+    parser.add_argument('--end_frac', type=float, default=None,
+                        help='Override end fraction [0..1]. If not provided, computed from XML data.')
+    parser.add_argument('--extra_args', type=str, default=None,
+                        help='Extra arguments to pass to prepfold or psrfold_fil.')
+
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
 
@@ -286,15 +332,41 @@ def main():
     segment_params = root[3]
     candidates = root[7]
 
+    # Read from XML
     prepfold_threads = args.presto_threads
     filterbank_file = str(search_params.find("infilename").text)
     tsamp = float(header_params.find("tsamp").text)
     fft_size = int(search_params.find("size").text)
     total_nsamples = int(root.find("header_parameters/nsamples").text)
     source_name_prefix = str(header_params.find("source_name").text).strip()
+
     segment_start_sample = int(segment_params.find('segment_start_sample').text)
     segment_nsamples = int(segment_params.find('segment_nsamples').text)
-    segment_pepoch = float(segment_params.find('segment_pepoch').text)
+    xml_segment_pepoch = float(segment_params.find('segment_pepoch').text)
+
+    # Decide which pepoch to use
+    if args.pepoch_override is not None:
+        segment_pepoch = args.pepoch_override
+        logging.info(f"Using user-provided pepoch = {segment_pepoch}")
+    else:
+        segment_pepoch = xml_segment_pepoch
+        logging.info(f"Using pepoch from XML = {segment_pepoch}")
+
+    # If user hasn't supplied explicit start_frac / end_frac, compute from XML data
+    if args.start_frac is not None:
+        user_start_fraction = args.start_frac
+        logging.info(f"Using user-provided start_frac = {user_start_fraction}")
+    else:
+        user_start_fraction = round(segment_start_sample / total_nsamples, 3)
+        logging.info(f"Using start_frac derived from XML = {user_start_fraction}")
+
+    if args.end_frac is not None:
+        user_end_fraction = args.end_frac
+        logging.info(f"Using user-provided end_frac = {user_end_fraction}")
+    else:
+        user_end_fraction = round((segment_start_sample + segment_nsamples) / total_nsamples, 3)
+        logging.info(f"Using end_frac derived from XML = {user_end_fraction}")
+
     effective_tobs = tsamp * segment_nsamples
 
     ignored_entries = [
@@ -317,7 +389,16 @@ def main():
 
     if args.fold_technique == 'presto':
         logging.info("Folding with Presto...")
-        fold_with_presto(df, filterbank_file, tsamp, fft_size, source_name_prefix, prepfold_threads, args.mask_file)
+        fold_with_presto(
+            df,
+            filterbank_file,
+            tsamp,
+            fft_size,
+            source_name_prefix,
+            prepfold_threads,
+            rfifind_mask=args.mask_file,
+            extra_args=args.extra_args
+        )
     else:
         logging.info("Folding with PulsarX...")
         if args.subint_length is None:
@@ -325,13 +406,29 @@ def main():
         else:
             subint_length = args.subint_length
 
-        fold_with_pulsarx(df, segment_start_sample, segment_nsamples,
-                          segment_pepoch, total_nsamples, filterbank_file,
-                          source_name_prefix, args.nbins_high,
-                          args.nbins_low, subint_length, args.nsubband,
-                          args.utc_beam, args.beam_name, args.pulsarx_threads,
-                          PulsarX_Template, args.clfd_q_value,
-                          args.rfi_filter, args.chan_mask)
+        fold_with_pulsarx(
+            df,
+            segment_start_sample,
+            segment_nsamples,
+            segment_pepoch,
+            total_nsamples,
+            filterbank_file,
+            source_name_prefix,
+            args.nbins_high,
+            args.nbins_low,
+            subint_length,
+            args.nsubband,
+            args.utc_beam,
+            args.beam_name,
+            args.pulsarx_threads,
+            PulsarX_Template,
+            args.clfd_q_value,
+            args.rfi_filter,
+            cmask=args.chan_mask,
+            start_fraction=user_start_fraction,
+            end_fraction=user_end_fraction,
+            extra_args=args.extra_args
+        )
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,16 @@
       "default": null
     },
     {
+      "name": "min_freq",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "max_freq",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "acc_pulse_width",
       "type": ["null", "string"],
       "default": null

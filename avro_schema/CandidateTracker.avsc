@@ -1,0 +1,32 @@
+{
+  "namespace": "org.compact-erc",
+  "type": "record",
+  "name": "candidate_tracker",
+  "fields": [
+    {
+      "name": "id",
+      "type": "bytes"
+    },
+    {
+      "name": "search_candidate_id",
+      "type": ["null", "bytes"],
+      "default": null
+    },
+    {
+      "name": "fold_candidate_id",
+      "type": ["null", "bytes"],
+      "default": null
+    },
+    {
+      "name": "candidate_filter_id",
+      "type": ["null", "int"],
+      "default": null
+    },
+    {
+    "name": "value",
+    "type": ["null", "float"],
+    "default": null
+    }
+
+  ]
+}

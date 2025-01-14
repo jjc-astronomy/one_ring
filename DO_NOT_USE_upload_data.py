@@ -1867,7 +1867,10 @@ def insert_data_products(data_products, beam_id, file_type_id, hardware_id):
 
     return raw_data_with_id
 
+    
 def clear_all_columns():
+    delete_all_rows("candidate_filter")
+    reset_primary_key_counter("candidate_filter")
     delete_all_rows("fold_candidate")
     reset_primary_key_counter("fold_candidate")
     delete_all_rows("search_candidate")

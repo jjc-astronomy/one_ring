@@ -21,7 +21,7 @@ from uuid_utils import UUIDUtility
 import ast
 import re
 from collections import OrderedDict
-
+import csv
 load_dotenv()
 
 class WorkflowJSONBuilder:
@@ -132,6 +132,44 @@ class DatabaseUploader:
         self.project_id = self._insert_project_name(self.project_name, return_id=True)
         self.telescope_id = self._insert_telescope_name(self.telescope_name, return_id=True)
         self.hardware_id = self._insert_hardware(self.hardware_name, return_id=True)
+
+    def create_entry(self, name, description, program_params):
+
+        return {
+            "program_name": name,
+            "description": description,
+            "container_image_name": program_params['container_image_name'],
+            "container_image_path": program_params['container_image_path'],
+            "container_image_version": program_params['container_image_version'],
+            "container_image_id": program_params['container_image_id'],
+            "container_type": program_params['container_type']
+        }
+    def dump_lookup_table(self, table_name, output_filename):
+        
+        
+        # Get a reference to the table using your existing helper
+        lookup_table = self._get_table(table_name)
+
+        # Build a SELECT statement for all rows
+        stmt = select(lookup_table)
+        
+        # Execute the query and fetch all results
+        with self.engine.connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+
+        # Extract column names
+        columns = [col.name for col in lookup_table.columns]
+        
+        # Write out to CSV
+        with open(output_filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            # Write header
+            writer.writerow(columns)
+            # Write each row
+            for row in rows:
+                writer.writerow(row)
+
+
 
     
     def upload_raw_data(self, csv_file):
@@ -314,6 +352,7 @@ class DatabaseUploader:
             data_products_for_filtool.append({
                 "target_name": pointing_metadata['target_name'],
                 "utc_start": pointing_metadata['utc_start'].split('.')[0] if '.' in pointing_metadata['utc_start'] else pointing_metadata['utc_start'],
+                "filstr": row['filstr'] if 'filstr' in row else self.project_name,
                 "pointing_id": pointing_id,
                 "beam_name": row['beam_name'],
                 "beam_id": beam_id,
@@ -379,7 +418,49 @@ class DatabaseUploader:
             #Keep only arguments for pulsarx
             pulsarx_arguments = {k: v for k, v in pulsarx_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
             self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
-               
+        
+        
+        try:
+            # Convert to integer
+            nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] = int(nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'])
+            
+            # Check if it's 0 or 1
+            if nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] not in (0, 1):
+                raise ValueError("Invalid value for candidate_filter.ml_fold_candidate_scoring. Value must be 0 or 1")
+            if nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] == 1:
+                logging.info("ML Candidate Scoring is enabled. Adding ML models into the pipeline.")
+                #Read ML Model Parameters
+                ml_model_params = self._store_ml_models_configs(nextflow_cfg, docker_hash_df)
+                
+        except:
+            raise ValueError("Invalid value for candidate_filter.ml_fold_candidate_scoring. Must be 0 or 1")
+        
+        try:
+            nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] = int(nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'])
+
+            if nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] not in (0, 1):
+                raise ValueError("Invalid value for candidate_filter.calculate_alpha_beta_gamma. Value must be 0 or 1")
+
+            if nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] == 1:
+                
+                logging.info("Alpha, Beta, Gamma calculation is enabled. Inserting into candidate filter")
+                alpha_params = self.create_entry("alpha", "S/N at ZERO DM/S/N at candidate DM", filtool_params)
+                beta_params = self.create_entry("beta", "ABS(DM_FFT - DM_FOLD)/DM_FFT", filtool_params)
+                gamma_params = self.create_entry("gamma", "DM_ERR/DM_FOLD", filtool_params)
+                #Insert candidate filter
+                alpha_id = self._insert_candidate_filter(alpha_params, return_id=True)
+                beta_id = self._insert_candidate_filter(beta_params, return_id=True)
+                gamma_id = self._insert_candidate_filter(gamma_params, return_id=True)
+        except:
+            raise ValueError("Invalid value for candidate_filter.calculate_alpha_beta_gamma. Must be an integer (0 or 1)")
+
+
+
+                
+
+        
+        
+        
         #Dump JSON
         self.json_builder.to_json()
 
@@ -457,6 +538,8 @@ class DatabaseUploader:
                         entry['acc_pulse_width']  = float(peasoup_cfg['acc_pulse_width']) if peasoup_cfg['acc_pulse_width'] is not None else None
                         entry['dm_pulse_width']   = float(peasoup_cfg['dm_pulse_width']) if peasoup_cfg['dm_pulse_width'] is not None else None
                         entry['min_snr']          = float(peasoup_cfg['min_snr']) if peasoup_cfg['min_snr'] is not None else None
+                        entry['min_freq']        = float(peasoup_cfg['min_freq']) if peasoup_cfg['min_freq'] is not None else 0.1
+                        entry['max_freq']        = float(peasoup_cfg['max_freq']) if peasoup_cfg['max_freq'] is not None else 1100.0
                         entry['ram_limit_gb']     = float(peasoup_cfg['ram_limit_gb']) if peasoup_cfg['ram_limit_gb'] is not None else None
                         entry['nharmonics']       = int(peasoup_cfg['nh']) if peasoup_cfg['nh'] is not None else None
                         entry['ngpus']            = int(peasoup_cfg['ngpus']) if peasoup_cfg['ngpus'] is not None else None
@@ -531,9 +614,47 @@ class DatabaseUploader:
             'container_type': "apptainer"
         })
 
+        # Conditionally add optional fields (For Candidate filters like PICS)
+        if 'filename' in params:
+            program_params['filename'] = params['filename']
+        if 'filepath' in params:
+            program_params['filepath'] = params['filepath']
+
         return program_params
 
-    
+    def _store_ml_models_configs(self, nextflow_cfg, docker_hash_df):
+        """
+        - Reads ml_models configs (JSON string).
+        - Inserts each ml_models configuration into DB.
+        - Returns a list of dicts with all ml_models configurations and program name and ID.
+        """
+        # Base container fields for ml_models
+        ml_models_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pics', 'pics')
+        
+        
+        # Decode ml_models JSON
+        all_ml_models_records = []
+        model_dir = nextflow_cfg['candidate_filter.ml_models_dir']
+        ml_models = glob.glob(f"{model_dir}/*.pkl")
+
+        if len(ml_models) == 0:
+            raise ValueError("No ML models found in the directory")
+        for ml_model in ml_models:
+            # For each ml_models config block in ml_models_configs
+            entry = dict(ml_models_params)
+            entry['filename'] = os.path.basename(ml_model)
+            entry['filepath'] = os.path.dirname(ml_model)
+            
+            # Insert into DB, retrieve ID
+            candidate_filter_id = self._insert_candidate_filter(entry, return_id=True, generate_filehash=True)
+            entry['program_id'] = candidate_filter_id
+            all_ml_models_records.append(entry)
+
+        return all_ml_models_records
+
+
+
+
     def _process_ddplan_entry(self, ddplan_entry):
         try:
             parts = ddplan_entry.split(':')
@@ -1152,6 +1273,18 @@ class DatabaseUploader:
         combined_args = "".join(str(params.get(key, "")) for key in keys_to_include)
         return hashlib.sha256(combined_args.encode()).hexdigest()
 
+    def _generate_file_content_hash(self, file_path):
+        """
+        Generates a SHA256 hash for the given file.
+
+        :param file_path: Path to the file.
+        :return: SHA256 hash string.
+        """
+        hasher = hashlib.sha256()
+        with open(file_path, "rb") as file:
+            for chunk in iter(lambda: file.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     def _insert_pipeline(self, name, github_repo_name, github_commit_hash, github_branch, description=None, return_id = False):
         
@@ -1250,7 +1383,7 @@ class DatabaseUploader:
             'dm_start', 'dm_end', 'dm_step', 'coherent_dm', 'nh',
             'fft_size', 'start_sample', 'nsamples', 'acc_start', 'acc_end',
             'dm_pulse_width', 'acc_pulse_width', 'min_snr', 'ram_limit_gb',
-            'total_cands', 'accel_tol', 'birdie_list', 'chan_mask'
+            'total_cands', 'accel_tol', 'birdie_list', 'chan_mask', 'min_freq', 'max_freq'
             
         ]
         argument_hash = self._generate_argument_hash(params, peasoup_keys)
@@ -1308,6 +1441,71 @@ class DatabaseUploader:
                 self.logger.debug(f"PulsarX parameters exist. Skipping...")
                 if return_id:
                     return pulsarx_id
+
+    def _insert_candidate_filter(self, params, return_id=False, generate_filehash=False):
+        candidate_filter_table = self._get_table("candidate_filter")
+
+        # Map program name to name field in the database
+        params['name'] = params['program_name']
+        keys_to_exclude = ['program_name', 'container_image_path']
+
+        with self.engine.connect() as conn:
+            if generate_filehash:
+                logging.info(f"Generating file hash for {params['filepath']}/{params['filename']}")
+                filehash = self._generate_file_content_hash(f"{params['filepath']}/{params['filename']}")
+                logging.info(f"File hash generated: {filehash}")
+                params['filehash'] = filehash
+
+                # Query to check if an entry with the same filehash exists
+                stmt = (
+                    select(candidate_filter_table)
+                    .where(candidate_filter_table.c.filehash == filehash)
+                    .limit(1)
+                )
+            else:
+                if 'filename' in params and 'filepath' in params:
+                    # Combine filename and filepath for comparison
+                    combined_path = f"{params['filepath']}/{params['filename']}"
+
+                    # Query to check if an entry with the same filepath and filename exists
+                    stmt = (
+                        select(candidate_filter_table)
+                        .where(
+                            (candidate_filter_table.c.filepath + '/' + candidate_filter_table.c.filename) == combined_path
+                        )
+                        .limit(1)
+                    )
+                else:
+                    # Fallback to checking uniqueness based on name
+                    stmt = (
+                        select(candidate_filter_table)
+                        .where(candidate_filter_table.c.name == params['name'])
+                        .limit(1)
+                    )
+
+            # Execute the query
+            result = conn.execute(stmt).first()
+
+            if result is None:
+                # Prepare parameters for insertion, excluding specific keys
+                params_insert = {k: v for k, v in params.items() if k not in keys_to_exclude}
+                stmt = insert(candidate_filter_table).values(params_insert)
+                db_update = conn.execute(stmt)
+                conn.commit()
+
+                candidate_filter_id = db_update.inserted_primary_key[0]
+                self.logger.debug("Added candidate filter parameters to candidate_filter table")
+
+                if return_id:
+                    return candidate_filter_id
+            else:
+                # Entry already exists
+                candidate_filter_id = result[0]
+                self.logger.debug("Candidate filter parameters exist. Skipping...")
+
+                if return_id:
+                    return candidate_filter_id
+
 
 
 
@@ -1369,6 +1567,8 @@ def main():
     )
 
     uploader.upload_raw_data(args.csv_file)
+    uploader.dump_lookup_table('file_type', 'file_type.csv')
+    uploader.dump_lookup_table('candidate_filter', 'candidate_filter.csv')
 
 if __name__ == "__main__":
     main()

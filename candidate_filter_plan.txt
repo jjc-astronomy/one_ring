@@ -1,0 +1,47 @@
+Candidate filter flow through DB.
+
+DB structure:
+
+candidate_filter sql table:
+id, name, description
+
+eg 1, pics_model1, "trained on X data"
+2, alpha, "snr at 0DM/snr at candidate DM"
+
+Make a link table(many-to many) with search_candidate, fold_candidate
+candidate_filter_lookup sql table:
+fold_candidate_id, search_candidate_id, candidate_filter_id, score
+1,1,2,0.5
+1,1,1,0.98
+
+
+alpha, beta -> instantly calculate during psrfold_fil (leave null if user does not request. Easy to implement.)
+pics -> requires two separate images wnt work.
+
+Database upload:
+insert candidate filter -> get ID 
+
+JSON Output
+program_name:"pics"
+program_id:"1"
+arguments{
+    model_name = "trapum.pkl"
+    model_path = "include/ml_models/"
+}
+
+nextflow:
+pure nextflow is easy, pass fold uuid to pics process, score, and dump csv.
+
+watchdog:
+if program_name.startswith('pics'):
+    build_pics_kafka_message(fold_candidate_csv_with_pics_score, program_id, model_name):
+    read CSV & insert into candidate_filter_lookup
+    for index, row in df.iterrows():
+        message{
+            fold_candidate_id: $fold_candidate_id
+            search_candidate_id: "optional" $search_candidate_id
+            candidate_filter_id: $program_id
+            score:   row['pics_score']
+        }
+
+
