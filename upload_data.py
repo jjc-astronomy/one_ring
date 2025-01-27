@@ -22,7 +22,11 @@ import ast
 import re
 from collections import OrderedDict
 import csv
-load_dotenv()
+from pathlib import Path
+
+
+load_dotenv(dotenv_path=Path('.compactdb.env'))
+
 
 class WorkflowJSONBuilder:
     def __init__(self, pipeline_id, json_db_ids_filename):
@@ -393,7 +397,7 @@ class DatabaseUploader:
             
             #Calculate pepoch, start_fraction, end_fraction, and effective tobs
             pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
-           
+            sys.exit()
             
             #If subint is null, set it to effective tobs/64
             if pulsarx_params.get('subint_length') == "null":
@@ -462,7 +466,7 @@ class DatabaseUploader:
         
         
         #Dump JSON
-        self.json_builder.to_json()
+        #self.json_builder.to_json()
 
     
     def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
@@ -480,6 +484,10 @@ class DatabaseUploader:
         nsamples = full_obs_metadata['nsamples']
         tsamp = full_obs_metadata['tsamp']
         tstart_mjd = full_obs_metadata['tstart_mjd']
+        print(f"full_obs_metadata: {full_obs_metadata}")
+        print(f"nsamples: {nsamples}, tsamp: {tsamp}, tstart_mjd: {tstart_mjd}")
+        print(f"start_sample: {start_sample}, fft_size: {fft_size}")
+        
 
         #This is used for folding.Round to 3 decimal places
         start_fraction = round(start_sample / nsamples, 3)
@@ -496,6 +504,8 @@ class DatabaseUploader:
         tstart_updated = tstart_mjd + start_time_days
         pepoch = round(tstart_updated + 0.5 * end_time_days, 6)
         effective_tobs = (end_fraction - start_fraction) * full_obs_metadata['tobs']
+        print(f"pepoch: {pepoch}, start_fraction: {start_fraction}, end_fraction: {end_fraction}, effective_tobs: {effective_tobs}")
+        sys.exit()
 
         return pepoch, start_fraction, end_fraction, effective_tobs
 
@@ -845,9 +855,12 @@ class DatabaseUploader:
         They are assumed to be separated only in time.
         """
 
+     
         if not isinstance(file_path, list):
             file_path = [file_path]
 
+        #Sort by filename
+        file_path.sort()
         # Extract the first header
         y = your.Your(file_path[0])
         h = y.your_header

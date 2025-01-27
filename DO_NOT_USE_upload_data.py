@@ -17,16 +17,18 @@ import uuid
 import json
 import uuid_utils
 import re
+from pathlib import Path
+
 #from natsort import natsorted
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path=Path('.compactdb.env'))
 
 # Postgres username, password, and database name
 DB_SERVER = os.getenv("DB_HOST")  # Insert your DB address if it's not on Panoply
 DB_PORT = os.getenv("DB_PORT")
 DB_USERNAME = os.getenv("DB_USERNAME")
 DB_PASSWORD = os.getenv("DB_PASSWORD")  # Change this to your Panoply/Postgres password
-DBNAME = 'testdb'  # Database name
+DBNAME = os.getenv("DB_NAME") #DB name
 
 connection_url = URL.create(
     "mysql+mysqlconnector", 
@@ -1901,10 +1903,8 @@ def clear_all_columns():
     reset_primary_key_counter("prepfold")
     delete_all_rows("beam_config")
     reset_primary_key_counter("beam_config")
-    delete_all_rows("data_product")
-    reset_primary_key_counter("data_product")
-    # delete_all_rows("beam_type")
-    # reset_primary_key_counter("beam_type")
+    delete_all_rows("beam_type")
+    reset_primary_key_counter("beam_type")
 
 
 def main():

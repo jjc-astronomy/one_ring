@@ -13,7 +13,7 @@ core*
 .nextflow*
 secrets.config
 Thoughts.txt
-.env
+.*env
 __pycache__
 kafka_env/
 include/ml_models/

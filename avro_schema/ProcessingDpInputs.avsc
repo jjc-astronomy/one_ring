@@ -14,6 +14,10 @@
     {
       "name": "task_id",
       "type": "int"
+    },
+    {
+      "name": "run_name",
+      "type": "string"
     }
   ]
 }

@@ -1,4 +1,4 @@
-directory: null  # Null implies use the script's directory with 'results/' appended
+directory: "/bscratch/vishnu/NGC1851_PROCESSING/LIVE_PROGRESS/"  # Null implies use the script's directory with 'results/' appended
 bootstrap_servers: "localhost:9092"
 schema_registry_url: "http://localhost:8081"
 processing_topic: "processing"

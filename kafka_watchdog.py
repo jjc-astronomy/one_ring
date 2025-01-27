@@ -275,7 +275,7 @@ class DataProductInputHandler:
         self.dp_topic = dp_topic
 
     
-    column_order = ['dp_id', 'session_id', 'task_id']
+    column_order = ['dp_id', 'session_id', 'task_id', 'run_name']
     rename_columns = {
         'input_dp_id': 'dp_id',
     }
@@ -307,7 +307,7 @@ class DataProductInputHandler:
             raise TypeError("Input should be a dictionary or a list of dictionaries")
 
 
-    def send_data_product_inputs(self, session_id, task_id, input_dp_id):
+    def send_data_product_inputs(self, session_id, task_id, input_dp_id, run_name):
         data_product_ids = input_dp_id.split()
         for dp_id in data_product_ids:
             
@@ -315,9 +315,10 @@ class DataProductInputHandler:
             message = {
                 'dp_id': dp_uuid,
                 'session_id': session_id,
-                'task_id': task_id
+                'task_id': task_id,
+                'run_name': run_name
             }
-            
+            #Send to kafka
             self.kafka_producer.produce_message(self.dp_topic, message)
 
 
@@ -337,16 +338,14 @@ class DataProductOutputHandler:
                     'filepath', 'filehash', 'available', 'metainfo', \
                     'locked', 'utc_start', 'tsamp', 'tobs', 'nsamples', \
                     'freq_start_mhz', 'freq_end_mhz',   \
-                    'hardware_id', 'mjd_start', 'fft_size', 'nchans', 'nbits', 'coherent_dm', 'subband_dm', 'session_id', 'task_id', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged', 'publish_dir']
+                    'hardware_id', 'mjd_start', 'fft_size', 'nchans', 'nbits', 'coherent_dm', 'subband_dm', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged', 'publish_dir']
     
     rename_columns = {
         'output_dp_id': 'id',
         'output_dp': 'filename',
         'tstart': 'mjd_start',
         'tstart_utc': 'utc_start',
-        'status': 'process_status',
-        'session_id': 'created_by_session_id',
-        'task_id': 'created_by_task_id'
+        'status': 'process_status'
     }
   
 
@@ -447,6 +446,7 @@ class DataProductOutputHandler:
             message['segment_nsamples'] = int(row['segment_nsamples'])
             message['segment_pepoch'] = float(row['segment_pepoch'])
             
+            #Send to kafka
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
     
     def pulsarx_to_kafka_producer(self, results_csv_file):
@@ -515,7 +515,9 @@ class DataProductOutputHandler:
                 message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
                 message['fold_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
                 message['candidate_filter_id'] = candidate_filter_id
-                message['value'] = row[model_name]
+                if not pd.isnull(row[model_name]):
+                    message['value'] = row[model_name]
+                
                 
                 #Send to kafka
                 self.kafka_producer_candidate_tracker.produce_message(self.candidate_tracker_topic, message)
@@ -537,7 +539,9 @@ class DataProductOutputHandler:
                 message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
                 message['fold_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
                 message['candidate_filter_id'] = candidate_filter_id
-                message['value'] = row[filter_name]
+                if not pd.isnull(row[filter_name]):
+                    message['value'] = row[filter_name]
+                
                 #Send to kafka
                 self.kafka_producer_candidate_tracker.produce_message(self.candidate_tracker_topic, message)
              
@@ -546,6 +550,7 @@ class DataProductOutputHandler:
         self,
         session_id: str,
         task_id: int,
+        run_name: str,
         taskname: str,
         workdir: str,
         beam_id: int,
@@ -582,6 +587,7 @@ class DataProductOutputHandler:
                 'filepath': filepath,
                 'created_by_session_id': session_id,
                 'created_by_task_id': task_id,
+                'created_by_run_name': run_name,
                 'hardware_id': hardware_id,
                 'available': optional_fields.get('available', 1),
                 'tsamp': optional_fields.get('tsamp'),
@@ -619,11 +625,11 @@ class DataProductOutputHandler:
                         message[key] = None
             message = {k: v for k, v in message.items() if v is not None}
             
-            
+            #Send to kafka
             self.kafka_producer_dp_output.produce_message(self.dp_output_topic, message)
             #If its an xml file, then we need to send the search candidate to the search candidate topic
             if file_extension == 'xml':
-                self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid)
+               self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid)
         
         #PulsarX folds
         if taskname.startswith("pulsarx"):
@@ -683,6 +689,8 @@ class JsonFileProcessor(FileSystemEventHandler):
           
             filtered_data_processing = ProcessingHandler.filter_and_rename(item)
             filtered_data_processing = KafkaProducer.convert_row_types(filtered_data_processing) 
+            
+            #Send to kafka
             self.kafka_producer_processing.produce_message(self.processing_topic, filtered_data_processing)
 
             if item['status'] == 'SUBMITTED':
@@ -690,8 +698,9 @@ class JsonFileProcessor(FileSystemEventHandler):
                 session_id = filtered_data_processing_dp_inputs.get('session_id')
                 task_id = filtered_data_processing_dp_inputs.get('task_id')
                 input_dp_id = filtered_data_processing_dp_inputs.get('dp_id')
+                run_name = filtered_data_processing_dp_inputs.get('run_name')
                 if input_dp_id:
-                   self.dp_inputs_handler.send_data_product_inputs(session_id, task_id, input_dp_id)
+                   self.dp_inputs_handler.send_data_product_inputs(session_id, task_id, input_dp_id, run_name)
             
             if item['status'] == 'COMPLETED':
                 filtered_data_dp_outputs = DataProductOutputHandler.filter_and_rename(item)    
@@ -699,6 +708,7 @@ class JsonFileProcessor(FileSystemEventHandler):
                 self.dp_outputs_handler.send_data_product_outputs(
                     session_id = filtered_data_processing['session_id'],
                     task_id = filtered_data_processing['task_id'],
+                    run_name = filtered_data_processing['run_name'],
                     taskname = filtered_data_processing['task_name'],
                     workdir = filtered_data_dp_outputs['workdir'],
                     beam_id = filtered_data_dp_outputs['beam_id'],

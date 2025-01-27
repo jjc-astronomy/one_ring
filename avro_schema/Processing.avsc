@@ -13,8 +13,7 @@
     },
     {
       "name": "run_name",
-      "type": ["null", "string"],
-      "default": null
+      "type": "string"
     },
     {
       "name": "pipeline_id",

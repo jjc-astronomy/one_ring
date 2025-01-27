@@ -8,7 +8,7 @@ import time
 import shlex
 import threading
 from multiprocessing import Pool, cpu_count
-
+import re
 ###############################################################################
 # Logging Setup
 ###############################################################################
@@ -164,7 +164,7 @@ def fold_with_pulsarx(
     nbins_high, nbins_low, subint_length, nsubband, utc_beam,
     beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
     rfi_filter, cmask=None, start_fraction=None, end_fraction=None,
-    extra_args=None
+    extra_args=None, output_rootname=None
 ):
     """
     Fold candidates with pulsarx (psrfold_fil). 
@@ -179,16 +179,20 @@ def fold_with_pulsarx(
 
     pulsarx_predictor = generate_pulsarX_cand_file(cand_freq, cand_dms, cand_accs, cand_snrs)
 
-    nbins_string = "-b {} --nbinplan 0.1 {}".format(nbins_low, nbins_high)
-    output_rootname = utc_beam
+    nbins_string = "-b {} --nbinplan 0.01 {}".format(nbins_low, nbins_high)
+    
+    if output_rootname is None:
+        output_rootname = utc_beam
 
     if 'ifbf' in beam_name:
         beam_tag = "--incoherent"
     elif 'cfbf' in beam_name:
         beam_tag = "-i {}".format(int(beam_name.strip("cfbf")))
     else:
-        beam_tag = ""
-
+        #pulsarx does not take strings as beam names
+        numeric_part = re.search(r'\d+$', beam_name).group()
+        beam_tag = "-i {}".format(numeric_part)
+      
     zap_string = ""
     if cmask is not None:
         cmask = cmask.strip()
@@ -205,7 +209,7 @@ def fold_with_pulsarx(
 
     # Build the base command
     script = (
-        "psrfold_fil -v -t {} --candfile {} -n {} {} {} --template {} "
+        "psrfold_fil2 -v --render -t {} --candfile {} -n {} {} {} --template {} "
         "--clfd {} -L {} -f {} {} -o {} --srcname {} --pepoch {} --frac {} {} {}"
     ).format(
         pulsarx_threads,
@@ -261,7 +265,7 @@ def fold_with_pulsarx(
     return_code = process.wait()
 
     if return_code != 0:
-        logging.error(f"psrfold_fil returned non-zero exit status {return_code}")
+        logging.error(f"psrfold_fil2 returned non-zero exit status {return_code}")
         sys.exit(1)
 
 ###############################################################################
@@ -272,6 +276,8 @@ def main():
     parser = argparse.ArgumentParser(description='Fold all candidates from Peasoup xml file')
     parser.add_argument('-o', '--output_path', help='Output path to save results',
                         default=os.getcwd(), type=str)
+    parser.add_argument('-r', '--output_rootname', help='Output rootname for each candidate',
+                        default=None, type=str)
     parser.add_argument('-i', '--input_file', help='Name of the input xml file',
                         type=str)
     parser.add_argument('-m', '--mask_file', help='Mask file for prepfold', type=str)
@@ -385,6 +391,8 @@ def main():
     df = pd.DataFrame(rows)
     df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int})
     df = df[df['nh'] >= args.nh]
+    # Limit to 1250 candidates
+    df = df.head(1250)
     PulsarX_Template = args.pulsarx_fold_template
 
     if args.fold_technique == 'presto':
@@ -427,7 +435,8 @@ def main():
             cmask=args.chan_mask,
             start_fraction=user_start_fraction,
             end_fraction=user_end_fraction,
-            extra_args=args.extra_args
+            extra_args=args.extra_args,
+            output_rootname=args.output_rootname
         )
 
 if __name__ == "__main__":

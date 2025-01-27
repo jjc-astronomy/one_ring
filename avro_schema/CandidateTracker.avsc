@@ -9,8 +9,7 @@
     },
     {
       "name": "search_candidate_id",
-      "type": ["null", "bytes"],
-      "default": null
+      "type": "bytes"
     },
     {
       "name": "fold_candidate_id",
@@ -19,8 +18,7 @@
     },
     {
       "name": "candidate_filter_id",
-      "type": ["null", "int"],
-      "default": null
+      "type": "int"
     },
     {
     "name": "value",

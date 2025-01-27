@@ -11,15 +11,19 @@ from sqlalchemy import MetaData, Table, insert, select, text, func
 from datetime import datetime
 import hashlib
 import decimal
+from pathlib import Path
+
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path=Path('.compactdb.env'))
+
+#load_dotenv()
 
 # Postgres username, password, and database name
 DB_SERVER = os.getenv("DB_HOST")  # Insert your DB address if it's not on Panoply
 DB_PORT = os.getenv("DB_PORT")
 DB_USERNAME = os.getenv("DB_USERNAME")
 DB_PASSWORD = os.getenv("DB_PASSWORD")  # Change this to your Panoply/Postgres password
-DBNAME = 'compact'  # Database name
+DBNAME = os.getenv("DB_NAME")
 
 connection_url = URL.create(
     "mysql+mysqlconnector", 
@@ -1031,10 +1035,22 @@ def insert_beam_antenna(antenna_id, beam_id, description=None):
 
 def main():
 
-    delete_all_rows('data_product')
-    reset_primary_key_counter('data_product')
+    #delete_all_rows('data_product')
+    #reset_primary_key_counter('data_product')
     # delete_all_rows('file_type')
     # reset_primary_key_counter('file_type')
+    delete_all_rows('hardware')
+    reset_primary_key_counter('hardware')
+    delete_all_rows('project')
+    reset_primary_key_counter('project')
+    delete_all_rows('antenna')
+    reset_primary_key_counter('antenna')
+    delete_all_rows('telescope')
+    reset_primary_key_counter('telescope')
+    delete_all_rows('file_type')
+    reset_primary_key_counter('file_type')
+    delete_all_rows('beam_type')
+    reset_primary_key_counter('beam_type')
   
     
 
@@ -1066,6 +1082,9 @@ def main():
     insert_file_type("ar", "Folded archive file")
     insert_file_type("pfd", "PRESTO folded archive file")
     insert_file_type("gz", "GZIP compressed file")
+    insert_file_type("bestprof", "PRESTO best profile file")
+    insert_file_type("ps", "POSTSCRIPT file")
+    insert_file_type("cands", "PulsarX results file")
     print_table("file_type")
 
     
@@ -1163,8 +1182,9 @@ def main():
 
 
 
-    insert_beam_type("Stokes_I", "Total Intensity Beam")
-    insert_beam_type("Baseband", "Baseband voltage beam")
+    insert_beam_type("STOKES_I", "Stokes I Intensity beam")
+    insert_beam_type("STOKES_L", "Linear polarisation beam (L = sqrt(Q2 + U2))")
+    insert_beam_type("STOKES_V", "Stokes V Circular polarisation beam")
     print_table("beam_type")
     
     # # #insert_beam("cfbf00000", "21:40:22.4100", "-23:10:48.8000", 1, 1, 0.000256, True)
@@ -1227,9 +1247,9 @@ def main():
 
     # insert_fold_candidate(1, 1, 1, 0.05111, 200.0, 1e-9, 0.0, 50.0, "Ter5_cfbf00000.ar", "/datax/scratch/compact/cbf/cbf00000", 2, 1)
     # print_table("fold_candidate")
-    insert_user("vishnu", "Vishnu Balakrishnan", "vishnu@mpifr-bonn.mpg.de", "123456", administrator=1)
-    insert_user("vivek", "Vivek Krishnan", "vkrishnan@mpifr-bonn.mpg.de", "654321", administrator=1)
-    print_table("user")
+    #insert_user("vishnu", "Vishnu Balakrishnan", "vishnu@mpifr-bonn.mpg.de", "123456", administrator=1)
+    #insert_user("vivek", "Vivek Krishnan", "vkrishnan@mpifr-bonn.mpg.de", "654321", administrator=1)
+    #print_table("user")
     
     # insert_user_labels(1, 1, rfi=1)
     # insert_user_labels(1, 2, noise=1)

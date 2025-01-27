@@ -172,7 +172,7 @@ process pulsarx {
     #!/bin/bash
     publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/"
 
-    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -v
+    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --extra_args "${program_args.extra_args}" 
     
     # Generate UUIDs for data_product DB Table
     fold_cands=\$(ls -v *.ar)
@@ -212,6 +212,7 @@ process pics{
     label 'pics'
     container "${params.apptainer_images.pics}"
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/", pattern: "*.csv", mode: 'copy'
+    errorStrategy 'ignore'
     
     input:
     tuple val(program_name),

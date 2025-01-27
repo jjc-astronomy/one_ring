@@ -14,5 +14,6 @@ id,name,description,context
 13,ar,Folded archive file,General
 14,pfd,PRESTO folded archive file,General
 15,gz,GZIP compressed file,General
-16,bestprof,,General
-17,ps,,General
+16,bestprof,PRESTO best profile file,General
+17,ps,POSTSCRIPT file,General
+18,cands,PulsarX results file,General

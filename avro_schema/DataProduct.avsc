@@ -86,6 +86,11 @@
       "default": null
     },
     {
+      "name": "created_by_run_name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "hardware_id",
       "type": ["null", "int"],
       "default": null
