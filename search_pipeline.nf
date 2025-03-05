@@ -143,9 +143,16 @@ process peasoup {
 process pulsarx {
     label 'pulsarx'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
 
-    errorStrategy 'ignore'
+    errorStrategy { 
+        if (task.attempt <= 3) {
+            sleep(task.attempt * 60000 as long) // Retry with increasing delay of 1 minute times the attempt number
+            return 'retry' // Retry the task
+        } else {
+            return 'ignore' // Ignore errors after exceeding retries
+        }
+    }
 
     input:
     tuple val(program_name),
@@ -170,12 +177,23 @@ process pulsarx {
     script:
     """
     #!/bin/bash
-    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/"
+    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/"
 
-    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --extra_args "${program_args.extra_args}" 
+    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -n 3 -v --extra_args "${program_args.extra_args}" 
     
     # Generate UUIDs for data_product DB Table
     fold_cands=\$(ls -v *.ar)
+
+    #Run dmffdot if there are missing png files.
+    for file in \$fold_cands; do
+        png_file="\${file%.ar}.png"
+        if [ ! -f "\$png_file" ]; then
+            echo "Missing PNG file for \$png_file. Running dmffdot."
+            dmffdot --telescope MeerKAT -f \$file
+        fi
+    done
+    
+
     fold_dp_id=""
     for file in \$fold_cands; do
         uuid=\$(uuidgen)
@@ -204,15 +222,24 @@ process pulsarx {
     output_dp="\$fold_cands \$rest_files"
     output_dp_id="\$fold_dp_id \$rest_dp_id"
     
-    
+
     """
 }
 
 process pics{
     label 'pics'
     container "${params.apptainer_images.pics}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/", pattern: "*.csv", mode: 'copy'
-    errorStrategy 'ignore'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "*.csv", mode: 'copy'
+    //errorStrategy 'ignore'
+    errorStrategy { 
+        if (task.attempt <= 3) {
+            sleep(task.attempt * 60000 as long) // Retry with increasing delay of 1 minute times the attempt number
+            return 'retry' // Retry the task
+        } else {
+            return 'ignore' // Ignore errors after exceeding retries
+        }
+    }
+
     
     input:
     tuple val(program_name),
@@ -236,7 +263,7 @@ process pics{
     """
     #!/bin/bash
     echo "Running PICS"
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/PICS"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/PICS/"
     mkdir -p \${publish_dir}
     python ${params.candidate_filter.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_models_dir} -f ${search_fold_merged} -g -c -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_pics_merged.csv"
@@ -249,10 +276,20 @@ process pics{
 process calculate_alpha_beta_gamma{
     label 'calculate_alpha_beta_gamma'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
 
-    errorStrategy 'ignore'
+    //errorStrategy 'ignore'
+
+    errorStrategy { 
+        if (task.attempt <= 3) {
+            sleep(task.attempt * 60000 as long) // Retry with increasing delay of 1 minute times the attempt number
+            return 'retry' // Retry the task
+        } else {
+            return 'ignore' // Ignore errors after exceeding retries
+        }
+    }
+
     
     input:
     tuple val(program_name),
@@ -275,7 +312,7 @@ process calculate_alpha_beta_gamma{
     script:
     """
     #!/bin/bash
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/"
     mkdir -p \${publish_dir}
     python ${params.candidate_filter.alpha_beta_gamma_script} -i ${search_fold_merged} --num_workers ${params.candidate_filter.calculate_alpha_beta_gamma_threads} --threshold ${params.candidate_filter.alpha_threshold} -c -g -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_alpha_beta_gamma_merged.csv"

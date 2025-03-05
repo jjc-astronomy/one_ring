@@ -8,8 +8,13 @@
       "type": "bytes"
     },
     {
-      "name": "spin_period",
-      "type": ["null", "float"],
+      "name": "spin_period_ms",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "spin_period_ms_error",
+      "type": ["null", "string"],
       "default": null
     },
     {
@@ -18,18 +23,53 @@
       "default": null
     },
     {
-      "name": "pdot",
+      "name": "dm_error",
       "type": ["null", "float"],
       "default": null
     },
     {
+      "name": "pdot",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdot_error",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "pdotdot",
-      "type": ["null", "float"],
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pdotdot_error",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "acc",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "acc_error",
+      "type": ["null", "string"],
       "default": null
     },
     {
       "name": "fold_snr",
       "type": ["null", "float"],
+      "default": null
+    },
+    {
+      "name": "filename",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "filepath",
+      "type": ["null", "string"],
       "default": null
     },
     {
@@ -51,6 +91,17 @@
       "name": "candidate_filter_id",
       "type": ["null", "int"],
       "default": null
+    },
+    {
+      "name": "subband_dm",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "segment_pepoch",
+      "type": ["null", "string"],
+      "default": null
     }
+
   ]
 }

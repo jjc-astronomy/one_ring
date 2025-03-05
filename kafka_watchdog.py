@@ -21,6 +21,8 @@ import xml.etree.ElementTree as ET
 import yaml
 from bestprof_utils import parse_pfd, parse_bestprof
 import glob
+from uncertainties import ufloat
+
 
 file_type_lookup_table = None
 
@@ -39,11 +41,65 @@ def calculate_spin(f=None, fdot=None, p=None, pdot=None):
         # calculate f and fdot from p and pdot
         elif p is not None and pdot is not None:
             f = 1 / p
-            fdot = -pdot * (p**2)
+            fdot = -pdot / (p**2)
         else:
             raise ValueError("Either (f, fdot) or (p, pdot) must be provided")
             
         return f, fdot, p, pdot
+
+
+def calculate_spin_with_error(f=None, fdot=None, p=None, pdot=None, f0_err=None, f1_err=None, p_err=None, pdot_err=None):
+
+
+    """
+    Compute spin parameters with optional Gaussian error propagation.
+    
+    If errors (f0_err, f1_err, p_err, pdot_err) are provided, propagate errors accordingly.
+    
+    Returns:
+    - f, fdot, p, pdot (values)
+    - f_err, fdot_err, p_err, pdot_err (errors, if applicable)
+    """
+
+    # Case: Given (f, fdot) -> Compute (p, pdot)
+    if f is not None and fdot is not None:
+        if f0_err is not None and f1_err is not None:
+            # Create ufloats to track propagation
+            f_u = ufloat(f, f0_err)
+            fdot_u = ufloat(fdot, f1_err)
+            
+            p_u = 1 / f_u
+            pdot_u = -fdot_u / (f_u ** 2)
+            
+            return p_u.nominal_value, pdot_u.nominal_value, p_u.s, pdot_u.s
+        
+        else:
+            # No error propagation needed
+            p = 1 / f
+            pdot = -fdot / (f ** 2)
+            return p, pdot, None, None
+
+    # Case: Given (p, pdot) -> Compute (f, fdot)
+    elif p is not None and pdot is not None:
+        if p_err is not None and pdot_err is not None:
+            # Create ufloats to track propagation
+            p_u = ufloat(p, p_err)
+            pdot_u = ufloat(pdot, pdot_err)
+            
+            f_u = 1 / p_u
+            fdot_u = -pdot_u / (p_u ** 2)
+            
+            return f_u.nominal_value, fdot_u.nominal_value, f_u.s, fdot_u.s
+        
+        else:
+            # No error propagation needed
+            f = 1 / p
+            fdot = -pdot / (p ** 2)
+            return f, fdot, None, None
+
+    else:
+        raise ValueError("Either (f, fdot) or (p, pdot) must be provided")
+
 
 def generate_file_hash(filepath: str) -> str:
     """
@@ -430,9 +486,10 @@ class DataProductOutputHandler:
         for index, row in df.iterrows():
             message = {}
             message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
-            message['spin_period'] = row['period']
+            message['spin_period_ms'] = str(row['period'] * 1000)
             message['dm'] = row['dm']
-            message['pdot'] = a_to_pdot(row['period'], row['acc'])
+            message['pdot'] = str(a_to_pdot(row['period'], row['acc']))
+            message['acc'] = str(row['acc'])
             message['snr'] = row['snr']
             message['ddm_count_ratio'] = row['ddm_count_ratio']
             message['ddm_snr_ratio'] = row['ddm_snr_ratio']
@@ -444,7 +501,7 @@ class DataProductOutputHandler:
             message['candidate_id_in_file'] = int(row['cand_id_in_file'])
             message['segment_start_sample'] = int(row['segment_start_sample'])
             message['segment_nsamples'] = int(row['segment_nsamples'])
-            message['segment_pepoch'] = float(row['segment_pepoch'])
+            message['segment_pepoch'] = str(row['segment_pepoch'])
             
             #Send to kafka
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
@@ -458,13 +515,20 @@ class DataProductOutputHandler:
         for index, row in results.iterrows():
             message = {}
             message['id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_candidates_database_uuid'])
-            f, fdot, p, pdot = calculate_spin(f=row['f0_new'], fdot=row['f1_new'])
-            message['spin_period'] = p
+            p, pdot, p_error, pdot_error = calculate_spin_with_error(f=row['f0_new'], fdot=row['f1_new'], f0_err=row['f0_err'], f1_err=row['f1_err'])
+            message['spin_period_ms'] = str(p * 1e3)
+            message['spin_period_ms_error'] = str(p_error * 1e3)
             message['dm'] = row['dm_new']
-            message['pdot'] = pdot
+            message['dm_error'] = row['dm_err']
+            message['pdot'] = str(pdot)
+            message['pdot_error'] = str(pdot_error)
+            message['acc'] = str(row['acc_new'])
+            message['acc_error'] = str(row['acc_err'])
             message['fold_snr'] = row['S/N_new']
             message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
             message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
+            
+
             
             #Send to kafka
             self.kafka_producer_fold_candidate.produce_message(self.fold_cand_topic, message)
@@ -565,6 +629,7 @@ class DataProductOutputHandler:
     ):
         data_product_ids = output_dp_id_list.split()
         filenames = filename_list.split()
+        
 
         for dp_id, filename in zip(data_product_ids, filenames):
             
@@ -633,16 +698,31 @@ class DataProductOutputHandler:
         
         #PulsarX folds
         if taskname.startswith("pulsarx"):
-            search_fold_merged_file = f"{workdir}/{optional_fields.get('search_fold_merged')}"
+            search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
+            if not os.path.isfile(search_fold_merged_file):
+                logging.error(f"File not found: {search_fold_merged_file} ")
+                sys.exit(1)
             self.pulsarx_to_kafka_producer(search_fold_merged_file)
         if taskname.startswith("prepfold"):
-            search_fold_merged_file = f"{workdir}/{optional_fields.get('search_fold_merged')}"
+            search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
+            if not os.path.isfile(search_fold_merged_file):
+                logging.error(f"File not found: {search_fold_merged_file} ")
+                sys.exit(1)
             self.prepfold_to_kafka_producer(search_fold_merged_file)
         if taskname.startswith("pics"):
-            output_dp_file = f"{workdir}/{filename_list}" 
+            if publish_dir:
+                # publish_dir inside nextflow points to the directory where we store shorted listed candidates for each model. 
+                filepath = filepath.rstrip("/").removesuffix("/PICS")
+            output_dp_file = f"{filepath}/{filename_list}"
+            if not os.path.isfile(output_dp_file):
+                logging.error(f"File not found: {output_dp_file} ")
+                sys.exit(1)
             self.pics_to_kafka_producer(output_dp_file)
         if taskname.startswith("calculate_alpha_beta_gamma"):
-            output_dp_file = f"{workdir}/{filename_list}" 
+            output_dp_file = f"{filepath}/{filename_list}" 
+            if not os.path.isfile(output_dp_file):
+                logging.error(f"File not found: {output_dp_file} ")
+                sys.exit(1)
             self.alpha_beta_gamma_to_kafka_producer(output_dp_file)
 
 class JsonFileProcessor(FileSystemEventHandler):

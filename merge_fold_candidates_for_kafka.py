@@ -19,7 +19,7 @@ def calculate_spin(f=None, fdot=None, p=None, pdot=None):
         pdot = -fdot / (f ** 2)
     elif p is not None and pdot is not None:
         f = 1 / p
-        fdot = -pdot * (p ** 2)
+        fdot = -pdot / (p ** 2)
     else:
         raise ValueError("Either (f, fdot) or (p, pdot) must be provided")
     return f, fdot, p, pdot
@@ -61,10 +61,14 @@ def pulsarx_to_kafka_message_format(filenames, pulsarx_cand_file, xml_file, data
     fold_data['fold_dp_output_uuid'] = data_product_ids
     fold_data['fold_candidates_database_uuid'] = fold_candidates_database_uuid_list
     fold_data['fold_cands_filename'] = filenames
-    
     search_data = get_xml_cands(xml_file)
- 
-    search_data['cand_id_in_file_match'] = search_data['cand_id_in_file'] + 1
+    #Temporary fix to remove the first 300 candidates
+    search_data = search_data.iloc[300:]
+    search_data = search_data.loc[search_data['nh'] >= 3]
+    search_data = search_data.reset_index(drop=True)
+    #index is matching key
+    search_data['cand_id_in_file_match'] = search_data.index + 1
+    #search_data['cand_id_in_file_match'] = search_data['cand_id_in_file'] + 1
     df = pd.merge(fold_data, search_data, left_on='#id', right_on='cand_id_in_file_match', how='inner')
     del df['cand_id_in_file_match']
     f, fdot, p, pdot = calculate_spin(f=df['f0_new'].values, fdot=df['f1_new'].values)

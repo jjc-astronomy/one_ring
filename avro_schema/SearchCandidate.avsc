@@ -8,8 +8,8 @@
       "type": "bytes"
     },
     {
-      "name": "spin_period",
-      "type": ["null", "float"],
+      "name": "spin_period_ms",
+      "type": ["null", "string"],
       "default": null
     },
     {
@@ -19,12 +19,17 @@
     },
     {
       "name": "pdot",
-      "type": ["null", "float"],
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "acc",
+      "type": ["null", "string"],
       "default": null
     },
     {
       "name": "pdotdot",
-      "type": ["null", "float"],
+      "type": ["null", "string"],
       "default": null
     },
     {
@@ -109,7 +114,7 @@
     },
      {
       "name": "segment_pepoch",
-      "type": ["null", "double"],
+      "type": ["null", "string"],
       "default": null
     }
     

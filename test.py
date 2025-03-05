@@ -390,16 +390,13 @@ def main():
 
     df = pd.DataFrame(rows)
     df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int})
-    logging.info(f"Skipping first 300 candidates. They were folded earlier")
-    #Get candidates after row 300
-    df = df.iloc[300:]
-
-    df = df[df['nh'] >= args.nh]
-    
-    logging.info(f"Number of candidates after filtering nh greater than equal to {args.nh}: {len(df.index)}")
-    
     # Limit to 300 candidates
     #df = df.head(300)
+    #Read from candidate 300 to end
+    
+    df = df.iloc[300:]
+    df = df[df['nh'] >= args.nh]
+    
     PulsarX_Template = args.pulsarx_fold_template
 
     if args.fold_technique == 'presto':

@@ -349,6 +349,7 @@ class DatabaseUploader:
             else:
                 beam_hardware_id = self.hardware_id
             
+            
             beam_cdm = (row['subband_dm'] if 'subband_dm' in row 
             else row['coherent_dm'] if 'coherent_dm' in row 
             else 0.0)

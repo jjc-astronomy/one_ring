@@ -57,7 +57,7 @@ def calculate_spin(f=None, fdot=None, p=None, pdot=None):
         pdot = -fdot / (f ** 2)
     elif p is not None and pdot is not None:
         f = 1 / p
-        fdot = -pdot * (p ** 2)
+        fdot = -pdot / (p ** 2)
     else:
         raise ValueError("Either (f, fdot) or (p, pdot) must be provided")
     return f, fdot, p, pdot
