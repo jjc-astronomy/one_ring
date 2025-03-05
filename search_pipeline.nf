@@ -414,101 +414,101 @@ workflow {
         ]
     }
     peasoup_output = peasoup(peasoup_input)
-    def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
+//     def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
     
     
-    pulsarx_input = Channel.from(pulsarx_prog)
-        .map { dp ->
-            [ dp.arguments.pepoch.toString(), [
-                program_args : dp.arguments,
-                program_id   : dp.program_id
-            ] ]
-        }
-    peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr ->
-        [
-            segment_pepoch.toString(),
-            [
-                output_dp      : output_dp,
-                output_dp_id   : output_dp_id,
-                segment_pepoch : segment_pepoch,
-                beam_name      : beam_name,
-                coherent_dm    : coherent_dm,
-                cfg_name       : cfg_name,
-                utc_start      : utc_start,
-                target_name    : target_name,
-                beam_id        : beam_id,
-                filstr         : filstr
-            ]
-        ]
-    }
-    pulsarx_input = peasoup_mapped.combine(pulsarx_input, by:0).map { segment_pepoch, peasoup_map, pulsarx_map ->
-        return [
-            program_name     : pulsarx_prog.program_name[0],
-            pipeline_id      : params.pipeline_id,
-            hardware_id      : filtool_prog.data_products[0].hardware_id,
-            program_args     : pulsarx_map.program_args,
-            program_id       : pulsarx_map.program_id,
-            input_dp         : peasoup_map.output_dp,
-            input_dp_id      : peasoup_map.output_dp_id,
-            target_name      : peasoup_map.target_name,
-            beam_id          : peasoup_map.beam_id,
-            utc_start        : peasoup_map.utc_start,
-            beam_name        : peasoup_map.beam_name,
-            coherent_dm      : peasoup_map.coherent_dm,
-            cfg_name         : peasoup_map.cfg_name,
-            filstr           : peasoup_map.filstr
-        ]
-    }
+//     pulsarx_input = Channel.from(pulsarx_prog)
+//         .map { dp ->
+//             [ dp.arguments.pepoch.toString(), [
+//                 program_args : dp.arguments,
+//                 program_id   : dp.program_id
+//             ] ]
+//         }
+//     peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr ->
+//         [
+//             segment_pepoch.toString(),
+//             [
+//                 output_dp      : output_dp,
+//                 output_dp_id   : output_dp_id,
+//                 segment_pepoch : segment_pepoch,
+//                 beam_name      : beam_name,
+//                 coherent_dm    : coherent_dm,
+//                 cfg_name       : cfg_name,
+//                 utc_start      : utc_start,
+//                 target_name    : target_name,
+//                 beam_id        : beam_id,
+//                 filstr         : filstr
+//             ]
+//         ]
+//     }
+//     pulsarx_input = peasoup_mapped.combine(pulsarx_input, by:0).map { segment_pepoch, peasoup_map, pulsarx_map ->
+//         return [
+//             program_name     : pulsarx_prog.program_name[0],
+//             pipeline_id      : params.pipeline_id,
+//             hardware_id      : filtool_prog.data_products[0].hardware_id,
+//             program_args     : pulsarx_map.program_args,
+//             program_id       : pulsarx_map.program_id,
+//             input_dp         : peasoup_map.output_dp,
+//             input_dp_id      : peasoup_map.output_dp_id,
+//             target_name      : peasoup_map.target_name,
+//             beam_id          : peasoup_map.beam_id,
+//             utc_start        : peasoup_map.utc_start,
+//             beam_name        : peasoup_map.beam_name,
+//             coherent_dm      : peasoup_map.coherent_dm,
+//             cfg_name         : peasoup_map.cfg_name,
+//             filstr           : peasoup_map.filstr
+//         ]
+//     }
     
-    pulsarx_output = pulsarx(pulsarx_input)
+//     pulsarx_output = pulsarx(pulsarx_input)
 
-    if (params.candidate_filter.ml_fold_candidate_scoring == 1){
+//     if (params.candidate_filter.ml_fold_candidate_scoring == 1){
 
-        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-            [
-                program_name    : "pics",
-                pipeline_id     : params.pipeline_id,
-                hardware_id     : filtool_prog.data_products[0].hardware_id,
-                output_archives : archives,
-                search_fold_merged : search_fold_merged_path,
-                pngs : pngs,
-                output_dp : output_dp,
-                output_dp_id : output_dp_id,
-                target_name : target_name,
-                beam_id : beam_id,
-                utc_start : utc_start,
-                cfg_name : cfg_name,
-                filstr : filstr,
-                archive_source_dir : publish_dir,
-            ]
+//         pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+//             [
+//                 program_name    : "pics",
+//                 pipeline_id     : params.pipeline_id,
+//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
+//                 output_archives : archives,
+//                 search_fold_merged : search_fold_merged_path,
+//                 pngs : pngs,
+//                 output_dp : output_dp,
+//                 output_dp_id : output_dp_id,
+//                 target_name : target_name,
+//                 beam_id : beam_id,
+//                 utc_start : utc_start,
+//                 cfg_name : cfg_name,
+//                 filstr : filstr,
+//                 archive_source_dir : publish_dir,
+//             ]
             
-        }
-       pics_output = pics(pics_input)
+//         }
+//        pics_output = pics(pics_input)
 
 
-    }
-  if (params.candidate_filter.calculate_alpha_beta_gamma == 1){
+//     }
+//   if (params.candidate_filter.calculate_alpha_beta_gamma == 1){
 
-        alpha_beta_gamma_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-            [
-                program_name    : "alpha_beta_gamma",
-                pipeline_id     : params.pipeline_id,
-                hardware_id     : filtool_prog.data_products[0].hardware_id,
-                output_archives : archives,
-                search_fold_merged : search_fold_merged_path,
-                pngs : pngs,
-                output_dp : output_dp,
-                output_dp_id : output_dp_id,
-                target_name : target_name,
-                beam_id : beam_id,
-                utc_start : utc_start,
-                cfg_name : cfg_name,
-                filstr : filstr,
-                archive_source_dir : publish_dir,
-            ]
+//         alpha_beta_gamma_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+//             [
+//                 program_name    : "alpha_beta_gamma",
+//                 pipeline_id     : params.pipeline_id,
+//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
+//                 output_archives : archives,
+//                 search_fold_merged : search_fold_merged_path,
+//                 pngs : pngs,
+//                 output_dp : output_dp,
+//                 output_dp_id : output_dp_id,
+//                 target_name : target_name,
+//                 beam_id : beam_id,
+//                 utc_start : utc_start,
+//                 cfg_name : cfg_name,
+//                 filstr : filstr,
+//                 archive_source_dir : publish_dir,
+//             ]
             
-        }
-       calculate_alpha_beta_gamma_output = calculate_alpha_beta_gamma(alpha_beta_gamma_input)
-}
+//         }
+//        calculate_alpha_beta_gamma_output = calculate_alpha_beta_gamma(alpha_beta_gamma_input)
+// }
 }
 

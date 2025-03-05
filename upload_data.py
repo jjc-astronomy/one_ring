@@ -398,7 +398,7 @@ class DatabaseUploader:
             
             #Calculate pepoch, start_fraction, end_fraction, and effective tobs
             pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
-            sys.exit()
+            
             
             #If subint is null, set it to effective tobs/64
             if pulsarx_params.get('subint_length') == "null":
@@ -459,15 +459,9 @@ class DatabaseUploader:
         except:
             raise ValueError("Invalid value for candidate_filter.calculate_alpha_beta_gamma. Must be an integer (0 or 1)")
 
-
-
-                
-
-        
-        
         
         #Dump JSON
-        #self.json_builder.to_json()
+        self.json_builder.to_json()
 
     
     def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
@@ -505,8 +499,7 @@ class DatabaseUploader:
         tstart_updated = tstart_mjd + start_time_days
         pepoch = round(tstart_updated + 0.5 * end_time_days, 6)
         effective_tobs = (end_fraction - start_fraction) * full_obs_metadata['tobs']
-        print(f"pepoch: {pepoch}, start_fraction: {start_fraction}, end_fraction: {end_fraction}, effective_tobs: {effective_tobs}")
-        sys.exit()
+       
 
         return pepoch, start_fraction, end_fraction, effective_tobs
 
