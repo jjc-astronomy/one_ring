@@ -1221,6 +1221,7 @@ class DatabaseUploader:
         with self.engine.connect() as conn:
             stmt = (
                 select(table)
+                .where(table.c.file_type_id == file_type_id)
                 .where(table.c.filepath == filepath)
                 .where(table.c.filename == filename)
                 .where(table.c.beam_id == beam_id)
