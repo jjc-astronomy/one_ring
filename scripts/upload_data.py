@@ -25,7 +25,7 @@ import csv
 from pathlib import Path
 
 
-load_dotenv(dotenv_path=Path('.compactdb.env'))
+load_dotenv(dotenv_path=Path('.testdb.env'))
 
 
 class WorkflowJSONBuilder:
@@ -33,6 +33,7 @@ class WorkflowJSONBuilder:
         self.pipeline_id = pipeline_id
         self.json_db_ids_filename = json_db_ids_filename
         self.programs = []
+        self.global_fields = {}  # New attribute for global fields
 
     def add_program_entry(self, program_name, program_id, metadata, arguments):
         # Check if this program entry already exists; if not, create it
@@ -55,12 +56,8 @@ class WorkflowJSONBuilder:
                 p['data_products'].extend(data_product_list)
                 return
 
-    def to_dict(self):
-        return {
-            "json_db_ids_filename": self.json_db_ids_filename,
-            "pipeline_id": self.pipeline_id,
-            "programs": self.programs
-        }
+    def add_global_field(self, key, value):
+        self.global_fields[key] = value
 
     def to_json(self, indent=2, filename=None):
         # Group programs by program_name while preserving the original order
@@ -84,6 +81,9 @@ class WorkflowJSONBuilder:
             "pipeline_id": self.pipeline_id,
             "programs": grouped_programs
         }
+        data.update(self.global_fields)
+        
+
         with open(filename, 'w') as f:
             json.dump(data, f, indent=indent)
 
@@ -137,7 +137,7 @@ class DatabaseUploader:
         self.telescope_id = self._insert_telescope_name(self.telescope_name, return_id=True)
         self.hardware_id = self._insert_hardware(self.hardware_name, return_id=True)
 
-    def create_entry(self, name, description, program_params):
+    def create_entry(self, name, description, program_params, extra_args=None):
 
         return {
             "program_name": name,
@@ -146,7 +146,8 @@ class DatabaseUploader:
             "container_image_path": program_params['container_image_path'],
             "container_image_version": program_params['container_image_version'],
             "container_image_id": program_params['container_image_id'],
-            "container_type": program_params['container_type']
+            "container_type": program_params['container_type'],
+            "extra_args": extra_args
         }
     def dump_lookup_table(self, table_name, output_filename):
         
@@ -350,9 +351,10 @@ class DatabaseUploader:
                 beam_hardware_id = self.hardware_id
             
             
-            beam_cdm = (row['subband_dm'] if 'subband_dm' in row 
+            pipeline_cdm = (row['subband_dm'] if 'subband_dm' in row 
             else row['coherent_dm'] if 'coherent_dm' in row 
             else 0.0)
+            
             data_products_for_filtool = []
             data_products_for_filtool.append({
                 "target_name": pointing_metadata['target_name'],
@@ -363,7 +365,7 @@ class DatabaseUploader:
                 "beam_id": beam_id,
                 "hardware": beam_hardware,
                 "hardware_id": beam_hardware_id,
-                "coherent_dm": beam_cdm,
+                "coherent_dm": pipeline_cdm,
                 "filenames": row['filenames'],
                 "dp_id": dp_id_list
             })
@@ -425,40 +427,82 @@ class DatabaseUploader:
             self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
         
         
+        #ML Model Scoring
         try:
             # Convert to integer
-            nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] = int(nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'])
+            nextflow_cfg['candidate_filter.ml_candidate_scoring.enable'] = int(nextflow_cfg['candidate_filter.ml_candidate_scoring.enable'])
             
             # Check if it's 0 or 1
-            if nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] not in (0, 1):
-                raise ValueError("Invalid value for candidate_filter.ml_fold_candidate_scoring. Value must be 0 or 1")
-            if nextflow_cfg['candidate_filter.ml_fold_candidate_scoring'] == 1:
+            if nextflow_cfg['candidate_filter.ml_candidate_scoring.enable'] not in (0, 1):
+                raise ValueError("Invalid value for candidate_filter.ml_candidate_scoring.enable. Value must be 0 or 1")
+            if nextflow_cfg['candidate_filter.ml_candidate_scoring.enable'] == 1:
                 logging.info("ML Candidate Scoring is enabled. Adding ML models into the pipeline.")
                 #Read ML Model Parameters
                 ml_model_params = self._store_ml_models_configs(nextflow_cfg, docker_hash_df)
                 
         except:
-            raise ValueError("Invalid value for candidate_filter.ml_fold_candidate_scoring. Must be 0 or 1")
+            raise ValueError("Invalid value for candidate_filter.ml_candidate_scoring.enable. Must be 0 or 1")
+        
+        # Post folding heuristics optional calculation
         
         try:
-            nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] = int(nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'])
+            nextflow_cfg['candidate_filter.calculate_post_folding_heuristics.enable'] = int(nextflow_cfg['candidate_filter.calculate_post_folding_heuristics.enable'])
 
-            if nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] not in (0, 1):
-                raise ValueError("Invalid value for candidate_filter.calculate_alpha_beta_gamma. Value must be 0 or 1")
+            if nextflow_cfg['candidate_filter.calculate_post_folding_heuristics.enable'] not in (0, 1):
+                raise ValueError("Invalid integer value for candidate_filter.calculate_post_folding_heuristics.enable. Value must be 0 or 1")
 
-            if nextflow_cfg['candidate_filter.calculate_alpha_beta_gamma'] == 1:
+            if nextflow_cfg['candidate_filter.calculate_post_folding_heuristics.enable'] == 1:
                 
                 logging.info("Alpha, Beta, Gamma calculation is enabled. Inserting into candidate filter")
                 alpha_params = self.create_entry("alpha", "S/N at ZERO DM/S/N at candidate DM", filtool_params)
                 beta_params = self.create_entry("beta", "ABS(DM_FFT - DM_FOLD)/DM_FFT", filtool_params)
                 gamma_params = self.create_entry("gamma", "DM_ERR/DM_FOLD", filtool_params)
+                delta_params = self.create_entry("delta", "sqrt((P_FFT - P_FOLD)**2 + (Pdot_FFT - Pdot_FOLD)**2)", filtool_params)
+                
                 #Insert candidate filter
                 alpha_id = self._insert_candidate_filter(alpha_params, return_id=True)
                 beta_id = self._insert_candidate_filter(beta_params, return_id=True)
                 gamma_id = self._insert_candidate_filter(gamma_params, return_id=True)
+                delta_id = self._insert_candidate_filter(delta_params, return_id=True)
         except:
-            raise ValueError("Invalid value for candidate_filter.calculate_alpha_beta_gamma. Must be an integer (0 or 1)")
+            raise ValueError("Invalid value for candidate_filter.calculate_post_folding_heuristics.enable. Must be an integer (0 or 1)")
 
+        # CandyPicker optional search filter
+        try:
+            nextflow_cfg['candidate_filter.candy_picker.enable'] = int(nextflow_cfg['candidate_filter.candy_picker.enable'])
+            if nextflow_cfg['candidate_filter.candy_picker.enable'] not in (0, 1):
+               
+                raise ValueError("Invalid value for candidate_filter.candy_picker.enable. Value must be 0 or 1")
+
+            if nextflow_cfg['candidate_filter.candy_picker.enable'] == 1:
+                try:
+                    period_tolerance = float(nextflow_cfg['candidate_filter.candy_picker.period_tolerance'])
+                except:
+                    raise ValueError("Invalid value for candidate_filter.candy_picker.period_tolerance. Must be a float")
+                try:
+                    dm_tolerance = float(nextflow_cfg['candidate_filter.candy_picker.dm_tolerance'])
+                except:
+                    raise ValueError("Invalid value for candidate_filter.candy_picker.dm_tolerance. Must be a float")
+
+                candy_picker_extra_args = f"-p {period_tolerance} -d {dm_tolerance}"
+               
+                
+                logging.info("CandyPicker is enabled. Inserting into candidate filter")
+                candy_picker_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'candy_picker', 'candy_picker')
+                candy_picker_params = self.create_entry("candy_picker", "Removes similar search candidates based on period and dm tolerance", candy_picker_params, extra_args=candy_picker_extra_args)
+                candy_picker_id = self._insert_candidate_filter(candy_picker_params, return_id=True)
+                
+                #Add candy_picker_groups to main JSON
+                candy_picker_groups = df.groupby('coherent_dm')['subband_dm'].agg(['min', 'max'])
+                candy_picker_groups = [[row['min'], row['max']] for _, row in candy_picker_groups.iterrows()]
+                # Add candy_picker_groups to main JSON
+                self.json_builder.add_global_field("candy_picker_groups", candy_picker_groups)
+
+               
+        except:
+            raise ValueError("Invalid value for candidate_filter.candy_picker.enable. Must be an integer (0 or 1)")
+        
+       
         
         #Dump JSON
         self.json_builder.to_json()
@@ -479,9 +523,6 @@ class DatabaseUploader:
         nsamples = full_obs_metadata['nsamples']
         tsamp = full_obs_metadata['tsamp']
         tstart_mjd = full_obs_metadata['tstart_mjd']
-        print(f"full_obs_metadata: {full_obs_metadata}")
-        print(f"nsamples: {nsamples}, tsamp: {tsamp}, tstart_mjd: {tstart_mjd}")
-        print(f"start_sample: {start_sample}, fft_size: {fft_size}")
         
 
         #This is used for folding.Round to 3 decimal places
@@ -638,7 +679,7 @@ class DatabaseUploader:
         
         # Decode ml_models JSON
         all_ml_models_records = []
-        model_dir = nextflow_cfg['candidate_filter.ml_models_dir']
+        model_dir = nextflow_cfg['candidate_filter.ml_candidate_scoring.models_dir']
         ml_models = glob.glob(f"{model_dir}/*.pkl")
 
         if len(ml_models) == 0:
@@ -1451,6 +1492,17 @@ class DatabaseUploader:
                     return pulsarx_id
 
     def _insert_candidate_filter(self, params, return_id=False, generate_filehash=False):
+        '''
+        
+        A unique candidate_filter should have:
+
+        1. Unique Container Image ID (Hash from Dockerhub)
+        2. Unique Name (program_name)
+        3. Unique Filehash (if generate_filehash is True) or
+        4. Unique combination of filename and filepath (if generate_filehash is False) and/or
+        5. Unique extra_args (if present)
+
+        '''
         candidate_filter_table = self._get_table("candidate_filter")
 
         # Map program name to name field in the database
@@ -1464,32 +1516,36 @@ class DatabaseUploader:
                 logging.info(f"File hash generated: {filehash}")
                 params['filehash'] = filehash
 
-                # Query to check if an entry with the same filehash exists
+                # Query to check if an entry with the same filehash exists and is associated with the same container image
                 stmt = (
                     select(candidate_filter_table)
                     .where(candidate_filter_table.c.filehash == filehash)
+                    .where(candidate_filter_table.c.container_image_id == params['container_image_id'])
                     .limit(1)
                 )
             else:
-                if 'filename' in params and 'filepath' in params:
+                stmt = select(candidate_filter_table)
+                # Check if filename and filepath exists and are not None
+                if all(params.get(key) is not None for key in ['filename', 'filepath']):
                     # Combine filename and filepath for comparison
                     combined_path = f"{params['filepath']}/{params['filename']}"
+                    stmt = stmt.where((candidate_filter_table.c.filepath + '/' + candidate_filter_table.c.filename) == combined_path)
 
-                    # Query to check if an entry with the same filepath and filename exists
-                    stmt = (
-                        select(candidate_filter_table)
-                        .where(
-                            (candidate_filter_table.c.filepath + '/' + candidate_filter_table.c.filename) == combined_path
-                        )
-                        .limit(1)
-                    )
+                    # Check if extra_args is not null
+                    if params.get('extra_args') is not None:
+
+                        stmt = stmt.where(candidate_filter_table.c.extra_args == params['extra_args'])
+
+                elif params.get('extra_args') is not None:
+                    stmt = stmt.where(candidate_filter_table.c.extra_args == params['extra_args'])
+
                 else:
                     # Fallback to checking uniqueness based on name
-                    stmt = (
-                        select(candidate_filter_table)
-                        .where(candidate_filter_table.c.name == params['name'])
-                        .limit(1)
-                    )
+                    stmt = stmt.where(candidate_filter_table.c.name == params['name'])
+                
+                stmt = stmt.where(candidate_filter_table.c.container_image_id == params['container_image_id'])
+                stmt = stmt.limit(1)
+                
 
             # Execute the query
             result = conn.execute(stmt).first()
@@ -1575,8 +1631,8 @@ def main():
     )
 
     uploader.upload_raw_data(args.csv_file)
-    uploader.dump_lookup_table('file_type', 'file_type.csv')
-    uploader.dump_lookup_table('candidate_filter', 'candidate_filter.csv')
+    uploader.dump_lookup_table('file_type', 'lookup_tables/file_type.csv')
+    uploader.dump_lookup_table('candidate_filter', 'lookup_tables/candidate_filter.csv')
 
 if __name__ == "__main__":
     main()

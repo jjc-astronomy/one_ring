@@ -8,15 +8,16 @@ IMAGES["vishnubk/pulsar-miner"]="turing-sm75"
 IMAGES["vishnubk/pulsarx"]="latest"
 IMAGES["vishnubk/pics"]="20230630_pics_model_update"
 IMAGES["vishnubk/mmgps_candidate_filter"]="20230821-rfi-filter-snr-thresh"
+IMAGES["vishnubk/candy_picker"]="latest"
 
 #apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
 # Output file
 OUTPUT_FILE="docker_image_digests.csv"
 
-# Check if output file exists, if not create it with headers
-if [ ! -f "$OUTPUT_FILE" ]; then
-    echo "Username,Image,Version,SHA256" > "$OUTPUT_FILE"
-fi
+#Remove OUTPUT_FILE if it exists
+rm -rf $OUTPUT_FILE
+
+echo "Username,Image,Version,SHA256" > "$OUTPUT_FILE"
 
 # Function to get digest
 get_digest() {

@@ -560,7 +560,7 @@ class DataProductOutputHandler:
     def pics_to_kafka_producer(self, results_csv_file):
         
         results = pd.read_csv(results_csv_file)
-        candidate_filter_df = pd.read_csv("candidate_filter.csv")
+        candidate_filter_df = pd.read_csv(GLOBAL_CANDIDATE_FILTER_FILE)
         if results.empty:
             logging.error(f"No output found in {search_fold_merged_file}")
         
@@ -589,7 +589,7 @@ class DataProductOutputHandler:
     def alpha_beta_gamma_to_kafka_producer(self, results_csv_file):
             
         results = pd.read_csv(results_csv_file)
-        candidate_filter_df = pd.read_csv("candidate_filter.csv")
+        candidate_filter_df = pd.read_csv(GLOBAL_CANDIDATE_FILTER_FILE)
         filters_to_iterate = ['alpha', 'beta', 'gamma']
         if results.empty:
             logging.error(f"No output found in {results_csv_file}")
@@ -881,7 +881,14 @@ def main(config):
         read_existing=read_existing
     )
 
-    create_file_type_lookup_table("file_type.csv")
+    create_file_type_lookup_table(config['file_type_lookup_table'])
+
+    GLOBAL_CANDIDATE_FILTER_FILE = config['candidate_filter_lookup_table']
+    if not os.path.isfile(GLOBAL_CANDIDATE_FILTER_FILE):
+        logging.error(f"File not found: {GLOBAL_CANDIDATE_FILTER_FILE}")
+        sys.exit(1)
+
+
 
     if read_existing:
         for filename in sorted(os.listdir(directory)):

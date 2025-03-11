@@ -57,6 +57,7 @@ process peasoup {
     label 'peasoup'
     container params.apptainer_images.peasoup
     errorStrategy 'ignore'
+    maxForks 2
 
     input:
     tuple val(program_name),
@@ -138,6 +139,71 @@ process peasoup {
     cfg_name=${program_args.cfg_name}
     
     """
+}
+
+process candy_picker{
+    label 'candy_picker'
+    container "${params.apptainer_images.candy_picker}"
+
+    input:
+    tuple val(program_name),
+          val(pipeline_id),
+          val(hardware_id),
+          val(input_dp), 
+          val(input_dp_id), 
+          val(target_name), 
+          val(beam_id), 
+          val(utc_start),
+          val(beam_name),
+          val(coherent_dm),
+          val(cfg_name),
+          val(filstr),
+          val(segment_pepoch)
+
+    output:
+    tuple env(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(coherent_dm), val(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(segment_pepoch)
+
+    script:
+    """
+    #!/bin/bash
+    
+    candy_picker_input_file_string=""
+    for filename_prefix in ${filstr}; do
+        #Define directory strucure
+        dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${filename_prefix}/${params.pipeline_name}/${cfg_name}/"
+        filename="output.xml"
+        # Create a directory with filename_prefix as its name
+        mkdir -p \${filename_prefix}
+        # Copy the output.xml file to the directory
+        cp \${dirname}/\${filename} \${filename_prefix}/
+        # Append the filename to the input file string
+        candy_picker_input_file_string="\${candy_picker_input_file_string} \${filename_prefix}/\${filename}"
+    done
+    # Run candy_picker
+
+    candy_picker -p ${params.candidate_filter.candy_picker.period_tolerance} -d ${params.candidate_filter.candy_picker.dm_tolerance} -n ${task.cpus} \${candy_picker_input_file_string}
+
+    output_dp=\$(ls -v **/output_*.xml | xargs realpath)
+    output_dp_id=""
+    for file in \$output_dp; do
+        uuid=\$(uuidgen)
+        output_dp_id="\$output_dp_id \$uuid"
+    done
+
+    output_files_relative_path=\$(ls -v **/output_*.xml)
+    publish_dir=""
+    for file in \$output_files_relative_path; do
+        dirname=\$(dirname \$file)
+        publish_dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${dirname}/${params.pipeline_name}/${cfg_name}/"
+        publish_dir="\${publish_dir} \${publish_dirname}"
+    done
+    echo "Publishing to \${publish_dir}"
+    echo "Output DP: \${output_dp}"
+    echo "Output DP ID: \${output_dp_id}"
+
+
+    """
+
 }
 
 process pulsarx {
@@ -265,7 +331,7 @@ process pics{
     echo "Running PICS"
     publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/PICS/"
     mkdir -p \${publish_dir}
-    python ${params.candidate_filter.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_models_dir} -f ${search_fold_merged} -g -c -s ${archive_source_dir} -p \${publish_dir}
+    python ${params.candidate_filter.ml_candidate_scoring.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_candidate_scoring.models_dir} -f ${search_fold_merged} -g -c -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_pics_merged.csv"
     output_dp_id=\$(uuidgen)
 
@@ -273,8 +339,8 @@ process pics{
 
 }
 
-process calculate_alpha_beta_gamma{
-    label 'calculate_alpha_beta_gamma'
+process calculate_post_folding_heuristics{
+    label 'calculate_post_folding_heuristics'
     container "${params.apptainer_images.pulsarx}"
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
@@ -314,7 +380,7 @@ process calculate_alpha_beta_gamma{
     #!/bin/bash
     publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/"
     mkdir -p \${publish_dir}
-    python ${params.candidate_filter.alpha_beta_gamma_script} -i ${search_fold_merged} --num_workers ${params.candidate_filter.calculate_alpha_beta_gamma_threads} --threshold ${params.candidate_filter.alpha_threshold} -c -g -s ${archive_source_dir} -p \${publish_dir}
+    python ${params.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.calculate_post_folding_heuristics.alpha_snr_threshold} -c -g -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_alpha_beta_gamma_merged.csv"
     output_dp_id=\$(uuidgen)
     """
@@ -327,7 +393,7 @@ workflow {
 
     // Build a channel that emits one map per data product:
     // Each emitted value is a single Groovy map with all fields needed for the process.
-   filtool_input = Channel.from( filtool_prog.data_products )
+    filtool_input = Channel.from( filtool_prog.data_products )
     .map { dp ->
         
 
@@ -414,101 +480,259 @@ workflow {
         ]
     }
     peasoup_output = peasoup(peasoup_input)
-//     def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
-    
-    
-//     pulsarx_input = Channel.from(pulsarx_prog)
-//         .map { dp ->
-//             [ dp.arguments.pepoch.toString(), [
-//                 program_args : dp.arguments,
-//                 program_id   : dp.program_id
-//             ] ]
-//         }
-//     peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr ->
-//         [
-//             segment_pepoch.toString(),
-//             [
-//                 output_dp      : output_dp,
-//                 output_dp_id   : output_dp_id,
-//                 segment_pepoch : segment_pepoch,
-//                 beam_name      : beam_name,
-//                 coherent_dm    : coherent_dm,
-//                 cfg_name       : cfg_name,
-//                 utc_start      : utc_start,
-//                 target_name    : target_name,
-//                 beam_id        : beam_id,
-//                 filstr         : filstr
-//             ]
-//         ]
-//     }
-//     pulsarx_input = peasoup_mapped.combine(pulsarx_input, by:0).map { segment_pepoch, peasoup_map, pulsarx_map ->
-//         return [
-//             program_name     : pulsarx_prog.program_name[0],
-//             pipeline_id      : params.pipeline_id,
-//             hardware_id      : filtool_prog.data_products[0].hardware_id,
-//             program_args     : pulsarx_map.program_args,
-//             program_id       : pulsarx_map.program_id,
-//             input_dp         : peasoup_map.output_dp,
-//             input_dp_id      : peasoup_map.output_dp_id,
-//             target_name      : peasoup_map.target_name,
-//             beam_id          : peasoup_map.beam_id,
-//             utc_start        : peasoup_map.utc_start,
-//             beam_name        : peasoup_map.beam_name,
-//             coherent_dm      : peasoup_map.coherent_dm,
-//             cfg_name         : peasoup_map.cfg_name,
-//             filstr           : peasoup_map.filstr
-//         ]
-//     }
-    
-//     pulsarx_output = pulsarx(pulsarx_input)
 
-//     if (params.candidate_filter.ml_fold_candidate_scoring == 1){
 
-//         pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "pics",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir,
-//             ]
+    def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
+    
+    
+    pulsarx_input = Channel.from(pulsarx_prog)
+        .map { dp ->
+            [ dp.arguments.pepoch.toString(), [
+                program_args : dp.arguments,
+                program_id   : dp.program_id
+            ] ]
+        }
+
+    if (params.candidate_filter.candy_picker.enable == 1){
+
+        candy_picker_groups = params.candy_picker_groups
+        candy_picker_input = peasoup_output.map { 
+        xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list ->
+        
+        // Ensure coherent_dm is a BigDecimal (if not already)
+        def cdm = coherent_dm instanceof BigDecimal ? coherent_dm : new BigDecimal(coherent_dm.toString())
+        
+        def match = candy_picker_groups.find { group ->
+            def lowerBound = new BigDecimal(group[0].toString())
+            def upperBound = new BigDecimal(group[1].toString())
+            return lowerBound <= cdm && cdm <= upperBound
+        }
+        
+        def groupKey = match ? match.toString() : 'none'
+        return tuple(groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list)
+        }
+        .groupTuple(by:[0, 9, 8, 10, 5, 7])
+        //Group by the interval key -> 0
+        //target name -> 9
+        // utc_start -> 8
+        //beam id -> 10
+        //beam name -> 5 (Using beam name is optional given that beam id is unique)
+        //same search configuration eg full,half segment searches -> 7
+        // Candy pickers runs on same beam, cdm but different subband_dm
+        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list ->
+                
+            return [
+                program_name : 'candy_picker',
+                pipeline_id  : params.pipeline_id,
+                hardware_id  : filtool_prog.data_products[0].hardware_id,
+                input_dp     : xml_list.join(" "),
+                input_dp_id  : xml_dp_id_list.join(" "),
+                target_name  : target_name,
+                beam_id      : beam_id,
+                utc_start    : utc_start,
+                beam_name    : beam_name,
+                coherent_dm  : coherent_dm,
+                cfg_name     : cfg_name,
+                filstr       : filstr_list.join(" "),
+                segment_pepoch_list : segment_pepoch_list[0]
+            ]
+        }
+
+        candy_picker_output = candy_picker(candy_picker_input)
+
+        candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch ->
             
-//         }
-//        pics_output = pics(pics_input)
+            return [
+                    output_dp      : output_dp,
+                    output_dp_id   : output_dp_id,
+                    segment_pepoch : segment_pepoch,
+                    beam_name      : beam_name,
+                    coherent_dm    : coherent_dm,
+                    cfg_name       : cfg_name,
+                    utc_start      : utc_start,
+                    target_name    : target_name,
+                    beam_id        : beam_id,
+                    filstr         : filstr
+                ]
+                
+        }
 
-
-//     }
-//   if (params.candidate_filter.calculate_alpha_beta_gamma == 1){
-
-//         alpha_beta_gamma_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "alpha_beta_gamma",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir,
-//             ]
+        // Create a new channel that unwraps the grouped records into individual accepted outputs.
+        candy_picker_unwrapped = candy_picker_mapped.flatMap { record ->
             
-//         }
-//        calculate_alpha_beta_gamma_output = calculate_alpha_beta_gamma(alpha_beta_gamma_input)
-// }
+            // Split output_dp by whitespace/newlines to get an array of file paths.
+            def files = record.output_dp.toString().split(/[\s\n]+/)
+            
+            // Split output_dp_id by whitespace and remove any empty entries.
+            def dpIds = record.output_dp_id.toString().split(/\s+/).findAll { it.trim() }
+            
+            // For coherent_dm and filstr, we assume each entry corresponds to a pair (one accepted and one rejected).
+            def cohDMs = (record.coherent_dm instanceof List) ? record.coherent_dm : record.coherent_dm.toString().split(/\s+/).findAll { it.trim() }
+            def filstrs = record.filstr.toString().split(/\s+/).findAll { it.trim() }
+            
+            // Determine the number of pairs (each pair contains an accepted and a rejected file)
+            def nPairs = files.size() / 2
+            def results = []
+            
+            /*
+            * For each pair of file paths in the 'files' list, we have two indices:
+            * - idx1: points to the first file in the pair.
+            * - idx2: points to the second file in the pair.
+            *
+            * Typically, one file is the accepted output (output_picked.xml) and the other is the rejected output.
+            * However, the order in which these files appear might not always be the same.
+            * For example, in some cases, the rejected file might appear first (idx1) and the accepted file second (idx2).
+            *
+            * The following lines use a ternary operator to determine which file is the accepted one,
+            * by checking if the file at idx1 contains the substring "output_picked.xml".
+            * If it does, then that file (and its corresponding DP ID) is selected.
+            * Otherwise, the file at idx2 is chosen.
+            */
+
+            for (int i = 0; i < nPairs; i++) {
+                // Calculate the indices for this pair
+                int idx1 = 2 * i
+                int idx2 = 2 * i + 1
+                
+                // Identify which file in the pair is the accepted one.
+                def acceptedFile = files[idx1].contains("output_picked.xml") ? files[idx1] : files[idx2]
+                def acceptedId   = files[idx1].contains("output_picked.xml") ? dpIds[idx1]   : dpIds[idx2]
+                
+                   results << [ 
+                        output_dp      : acceptedFile,
+                        output_dp_id   : acceptedId,
+                        segment_pepoch : record.segment_pepoch,
+                        beam_name      : record.beam_name,
+                        coherent_dm    : cohDMs[i],
+                        cfg_name       : record.cfg_name,
+                        utc_start      : record.utc_start,
+                        target_name    : record.target_name,
+                        beam_id        : record.beam_id,
+                        filstr         : filstrs[i]
+                    ]
+                
+            }
+            return results
+            
+        }
+    
+        //Map candy_picker_unwrapped with segment_pepoch as key and prepare input for pulsarx
+        candy_picker_with_pepoch_key = candy_picker_unwrapped.map { record ->
+        [
+            record.segment_pepoch.toString(),  // key
+            record                             // the record as the value
+        ]
+        }
+
+        pulsarx_input = candy_picker_with_pepoch_key.combine(pulsarx_input, by:0).map { segment_pepoch, candy_picker_map, pulsarx_map ->
+            return [
+                program_name     : pulsarx_prog.program_name[0],
+                pipeline_id      : params.pipeline_id,
+                hardware_id      : filtool_prog.data_products[0].hardware_id,
+                program_args     : pulsarx_map.program_args,
+                program_id       : pulsarx_map.program_id,
+                input_dp         : candy_picker_map.output_dp,
+                input_dp_id      : candy_picker_map.output_dp_id,
+                target_name      : candy_picker_map.target_name,
+                beam_id          : candy_picker_map.beam_id,
+                utc_start        : candy_picker_map.utc_start,
+                beam_name        : candy_picker_map.beam_name,
+                coherent_dm      : candy_picker_map.coherent_dm,
+                cfg_name         : candy_picker_map.cfg_name,
+                filstr           : candy_picker_map.filstr
+            ]
+        }
+    }
+    else {
+
+        peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr ->
+        [
+            segment_pepoch.toString(),
+            [
+                output_dp      : output_dp,
+                output_dp_id   : output_dp_id,
+                segment_pepoch : segment_pepoch,
+                beam_name      : beam_name,
+                coherent_dm    : coherent_dm,
+                cfg_name       : cfg_name,
+                utc_start      : utc_start,
+                target_name    : target_name,
+                beam_id        : beam_id,
+                filstr         : filstr
+            ]
+        ]
+    }
+    pulsarx_input = peasoup_mapped.combine(pulsarx_input, by:0).map { segment_pepoch, peasoup_map, pulsarx_map ->
+        return [
+            program_name     : pulsarx_prog.program_name[0],
+            pipeline_id      : params.pipeline_id,
+            hardware_id      : filtool_prog.data_products[0].hardware_id,
+            program_args     : pulsarx_map.program_args,
+            program_id       : pulsarx_map.program_id,
+            input_dp         : peasoup_map.output_dp,
+            input_dp_id      : peasoup_map.output_dp_id,
+            target_name      : peasoup_map.target_name,
+            beam_id          : peasoup_map.beam_id,
+            utc_start        : peasoup_map.utc_start,
+            beam_name        : peasoup_map.beam_name,
+            coherent_dm      : peasoup_map.coherent_dm,
+            cfg_name         : peasoup_map.cfg_name,
+            filstr           : peasoup_map.filstr
+        ]
+    }
+
+    }
+
+    pulsarx_output = pulsarx(pulsarx_input)
+
+    if (params.candidate_filter.ml_candidate_scoring.enable == 1){
+
+        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "pics",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir,
+            ]
+            
+        }
+       pics_output = pics(pics_input)
+
+
+    }
+    if (params.calculate_post_folding_heuristics.enable == 1){
+
+        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "alpha_beta_gamma",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir,
+            ]
+            
+        }
+        
+        calculate_post_folding_heuristics_output = calculate_post_folding_heuristics(alpha_beta_gamma_input)
+}
 }
 
