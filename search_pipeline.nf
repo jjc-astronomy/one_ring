@@ -155,13 +155,13 @@ process candy_picker{
           val(beam_id), 
           val(utc_start),
           val(beam_name),
-          val(coherent_dm),
+          val(coherent_dm_list),
           val(cfg_name),
           val(filstr),
           val(segment_pepoch)
 
     output:
-    tuple env(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(coherent_dm), val(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(segment_pepoch)
+    tuple env(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(coherent_dm_list), val(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(segment_pepoch)
 
     script:
     """
@@ -183,7 +183,7 @@ process candy_picker{
 
     candy_picker -p ${params.candidate_filter.candy_picker.period_tolerance} -d ${params.candidate_filter.candy_picker.dm_tolerance} -n ${task.cpus} \${candy_picker_input_file_string}
 
-    output_dp=\$(ls -v **/output_*.xml | xargs realpath)
+    output_dp=\$(ls -v **/output_*.xml | xargs realpath | tr '\n' ' ')
     output_dp_id=""
     for file in \$output_dp; do
         uuid=\$(uuidgen)
@@ -339,8 +339,8 @@ process pics{
 
 }
 
-process calculate_post_folding_heuristics{
-    label 'calculate_post_folding_heuristics'
+process post_folding_heuristics{
+    label 'post_folding_heuristics'
     container "${params.apptainer_images.pulsarx}"
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
@@ -682,57 +682,58 @@ workflow {
     }
 
     }
+    pulsarx_input.view()
 
-    pulsarx_output = pulsarx(pulsarx_input)
+//     pulsarx_output = pulsarx(pulsarx_input)
 
-    if (params.candidate_filter.ml_candidate_scoring.enable == 1){
+//     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
 
-        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-            [
-                program_name    : "pics",
-                pipeline_id     : params.pipeline_id,
-                hardware_id     : filtool_prog.data_products[0].hardware_id,
-                output_archives : archives,
-                search_fold_merged : search_fold_merged_path,
-                pngs : pngs,
-                output_dp : output_dp,
-                output_dp_id : output_dp_id,
-                target_name : target_name,
-                beam_id : beam_id,
-                utc_start : utc_start,
-                cfg_name : cfg_name,
-                filstr : filstr,
-                archive_source_dir : publish_dir,
-            ]
+//         pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+//             [
+//                 program_name    : "pics",
+//                 pipeline_id     : params.pipeline_id,
+//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
+//                 output_archives : archives,
+//                 search_fold_merged : search_fold_merged_path,
+//                 pngs : pngs,
+//                 output_dp : output_dp,
+//                 output_dp_id : output_dp_id,
+//                 target_name : target_name,
+//                 beam_id : beam_id,
+//                 utc_start : utc_start,
+//                 cfg_name : cfg_name,
+//                 filstr : filstr,
+//                 archive_source_dir : publish_dir,
+//             ]
             
-        }
-       pics_output = pics(pics_input)
+//         }
+//        pics_output = pics(pics_input)
 
 
-    }
-    if (params.calculate_post_folding_heuristics.enable == 1){
+//     }
+//     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
-        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-            [
-                program_name    : "alpha_beta_gamma",
-                pipeline_id     : params.pipeline_id,
-                hardware_id     : filtool_prog.data_products[0].hardware_id,
-                output_archives : archives,
-                search_fold_merged : search_fold_merged_path,
-                pngs : pngs,
-                output_dp : output_dp,
-                output_dp_id : output_dp_id,
-                target_name : target_name,
-                beam_id : beam_id,
-                utc_start : utc_start,
-                cfg_name : cfg_name,
-                filstr : filstr,
-                archive_source_dir : publish_dir,
-            ]
+//         calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+//             [
+//                 program_name    : "alpha_beta_gamma",
+//                 pipeline_id     : params.pipeline_id,
+//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
+//                 output_archives : archives,
+//                 search_fold_merged : search_fold_merged_path,
+//                 pngs : pngs,
+//                 output_dp : output_dp,
+//                 output_dp_id : output_dp_id,
+//                 target_name : target_name,
+//                 beam_id : beam_id,
+//                 utc_start : utc_start,
+//                 cfg_name : cfg_name,
+//                 filstr : filstr,
+//                 archive_source_dir : publish_dir,
+//             ]
             
-        }
+//         }
         
-        calculate_post_folding_heuristics_output = calculate_post_folding_heuristics(alpha_beta_gamma_input)
-}
+//         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
+// }
 }
 

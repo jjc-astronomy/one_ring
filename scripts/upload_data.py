@@ -149,14 +149,23 @@ class DatabaseUploader:
             "container_type": program_params['container_type'],
             "extra_args": extra_args
         }
-    def dump_lookup_table(self, table_name, output_filename):
+    def dump_lookup_table(self, table_name, output_filename, id_dict=None):
+
+        '''
+        Dump a Lookup table to a CSV file for watchdog.
+        If id_dict is provided, only dump the rows with the provided IDs.
+        '''
         
         
         # Get a reference to the table using your existing helper
         lookup_table = self._get_table(table_name)
 
-        # Build a SELECT statement for all rows
-        stmt = select(lookup_table)
+        # If filtering by candidate filter IDs is needed
+        if id_dict is not None:
+            filter_ids = list(id_dict.values())
+            stmt = select(lookup_table).where(lookup_table.c.id.in_(filter_ids))
+        else:
+            stmt = select(lookup_table) # Select all rows
         
         # Execute the query and fetch all results
         with self.engine.connect() as conn:
@@ -177,13 +186,14 @@ class DatabaseUploader:
 
 
     
-    def upload_raw_data(self, csv_file):
+    def upload_raw_data(self, csv_file, return_candidate_filter_id=False):
         """
         Read the CSV and upload all data products.
         CSV columns:
         filenames,beam_name,utc_start,hardware_name
 
         'filenames' may contain multiple files separated by spaces.
+        If return_candidate_filter_id is True, return the ID of the candidate filters, to make updated candidate_filter.csv lookup table.
         """
         self.logger.info(f"IMPORTANT: Ensure Your nf_config_for_data_upload.cfg is updated by running nextflow config -profile contra -flat -sort > nf_config_for_data_upload.cfg")
         self.logger.info(f"Uploading data from {csv_file}")
@@ -427,6 +437,8 @@ class DatabaseUploader:
             self.json_builder.add_program_entry("pulsarx", pulsarx_id, pulsarx_metadata, pulsarx_arguments)
         
         
+        # Candidate Filters start from here. PICS -> Post Folding Heuristics -> CandyPicker
+        candidate_filter_ids = {}
         #ML Model Scoring
         try:
             # Convert to integer
@@ -438,7 +450,8 @@ class DatabaseUploader:
             if nextflow_cfg['candidate_filter.ml_candidate_scoring.enable'] == 1:
                 logging.info("ML Candidate Scoring is enabled. Adding ML models into the pipeline.")
                 #Read ML Model Parameters
-                ml_model_params = self._store_ml_models_configs(nextflow_cfg, docker_hash_df)
+                ml_model_params, candidate_filter_ids = self._store_ml_models_configs(nextflow_cfg, docker_hash_df, candidate_filter_ids)
+                
                 
         except:
             raise ValueError("Invalid value for candidate_filter.ml_candidate_scoring.enable. Must be 0 or 1")
@@ -453,17 +466,30 @@ class DatabaseUploader:
 
             if nextflow_cfg['candidate_filter.calculate_post_folding_heuristics.enable'] == 1:
                 
+                program_type = 'post_folding_heuristics'
                 logging.info("Alpha, Beta, Gamma calculation is enabled. Inserting into candidate filter")
-                alpha_params = self.create_entry("alpha", "S/N at ZERO DM/S/N at candidate DM", filtool_params)
-                beta_params = self.create_entry("beta", "ABS(DM_FFT - DM_FOLD)/DM_FFT", filtool_params)
-                gamma_params = self.create_entry("gamma", "DM_ERR/DM_FOLD", filtool_params)
-                delta_params = self.create_entry("delta", "sqrt((P_FFT - P_FOLD)**2 + (Pdot_FFT - Pdot_FOLD)**2)", filtool_params)
+                
+                #Define params dictionary. This maps to name and description in the database
+                params = {
+                    "alpha": "S/N at ZERO DM/S/N at candidate DM",
+                    "beta": "ABS(DM_FFT - DM_FOLD)/DM_FFT",
+                    "gamma": "DM_ERR/DM_FOLD",
+                    "delta": "sqrt((P_FFT - P_FOLD)**2 + (Pdot_FFT - Pdot_FOLD)**2)"
+                }
+                entries = {
+                    key: {**self.create_entry(key, desc, filtool_params), "type": program_type}
+                    for key, desc in params.items()
+                }
+                alpha_params, beta_params, gamma_params, delta_params = (
+                    entries["alpha"], entries["beta"], entries["gamma"], entries["delta"]
+                )
                 
                 #Insert candidate filter
-                alpha_id = self._insert_candidate_filter(alpha_params, return_id=True)
-                beta_id = self._insert_candidate_filter(beta_params, return_id=True)
-                gamma_id = self._insert_candidate_filter(gamma_params, return_id=True)
-                delta_id = self._insert_candidate_filter(delta_params, return_id=True)
+                candidate_filter_ids['alpha'] = self._insert_candidate_filter(alpha_params, return_id=True)
+                candidate_filter_ids['beta'] = self._insert_candidate_filter(beta_params, return_id=True)
+                candidate_filter_ids['gamma'] = self._insert_candidate_filter(gamma_params, return_id=True)
+                candidate_filter_ids['delta'] = self._insert_candidate_filter(delta_params, return_id=True)
+                
         except:
             raise ValueError("Invalid value for candidate_filter.calculate_post_folding_heuristics.enable. Must be an integer (0 or 1)")
 
@@ -475,6 +501,9 @@ class DatabaseUploader:
                 raise ValueError("Invalid value for candidate_filter.candy_picker.enable. Value must be 0 or 1")
 
             if nextflow_cfg['candidate_filter.candy_picker.enable'] == 1:
+
+                program_type = 'candy_picker'
+
                 try:
                     period_tolerance = float(nextflow_cfg['candidate_filter.candy_picker.period_tolerance'])
                 except:
@@ -485,12 +514,14 @@ class DatabaseUploader:
                     raise ValueError("Invalid value for candidate_filter.candy_picker.dm_tolerance. Must be a float")
 
                 candy_picker_extra_args = f"-p {period_tolerance} -d {dm_tolerance}"
-               
-                
+
                 logging.info("CandyPicker is enabled. Inserting into candidate filter")
                 candy_picker_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'candy_picker', 'candy_picker')
                 candy_picker_params = self.create_entry("candy_picker", "Removes similar search candidates based on period and dm tolerance", candy_picker_params, extra_args=candy_picker_extra_args)
-                candy_picker_id = self._insert_candidate_filter(candy_picker_params, return_id=True)
+                candy_picker_params['type'] = program_type
+                
+                #Insert candidate filter and update candidate_filter_ids
+                candidate_filter_ids['candy_picker'] = self._insert_candidate_filter(candy_picker_params, return_id=True)
                 
                 #Add candy_picker_groups to main JSON
                 candy_picker_groups = df.groupby('coherent_dm')['subband_dm'].agg(['min', 'max'])
@@ -506,6 +537,9 @@ class DatabaseUploader:
         
         #Dump JSON
         self.json_builder.to_json()
+
+        if return_candidate_filter_id:
+            return candidate_filter_ids
 
     
     def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
@@ -667,15 +701,13 @@ class DatabaseUploader:
 
         return program_params
 
-    def _store_ml_models_configs(self, nextflow_cfg, docker_hash_df):
+    def _store_ml_models_configs(self, nextflow_cfg, docker_hash_df, candidate_filter_ids):
         """
         - Reads ml_models configs (JSON string).
         - Inserts each ml_models configuration into DB.
-        - Returns a list of dicts with all ml_models configurations and program name and ID.
+        - Returns a list of dicts with all ml_models configurations and program name and ID AND
+        - Updates candidate_filter_ids with the generated IDs.
         """
-        # Base container fields for ml_models
-        ml_models_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pics', 'pics')
-        
         
         # Decode ml_models JSON
         all_ml_models_records = []
@@ -685,17 +717,26 @@ class DatabaseUploader:
         if len(ml_models) == 0:
             raise ValueError("No ML models found in the directory")
         for ml_model in ml_models:
+            basename = os.path.basename(ml_model)
+            dirname = os.path.dirname(ml_model)
+            filename_without_ext = os.path.splitext(basename)[0]
+            ml_models_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, filename_without_ext, 'pics')
             # For each ml_models config block in ml_models_configs
             entry = dict(ml_models_params)
-            entry['filename'] = os.path.basename(ml_model)
-            entry['filepath'] = os.path.dirname(ml_model)
+            entry['type'] = 'pics'
+            entry['filename'] = basename
+            entry['filepath'] = dirname
             
             # Insert into DB, retrieve ID
+            #append candidate_filter_ids with the generated IDs
             candidate_filter_id = self._insert_candidate_filter(entry, return_id=True, generate_filehash=True)
+            candidate_filter_ids[filename_without_ext] = candidate_filter_id
+
+            #Not sure why I need an extra program_id, resolve later.
             entry['program_id'] = candidate_filter_id
             all_ml_models_records.append(entry)
 
-        return all_ml_models_records
+        return all_ml_models_records, candidate_filter_ids
 
 
 
@@ -1630,9 +1671,9 @@ def main():
         overrides=overrides
     )
 
-    uploader.upload_raw_data(args.csv_file)
+    candidate_filter_ids = uploader.upload_raw_data(args.csv_file, return_candidate_filter_id=True)
     uploader.dump_lookup_table('file_type', 'lookup_tables/file_type.csv')
-    uploader.dump_lookup_table('candidate_filter', 'lookup_tables/candidate_filter.csv')
+    uploader.dump_lookup_table('candidate_filter', 'lookup_tables/candidate_filter.csv', id_dict=candidate_filter_ids)
 
 if __name__ == "__main__":
     main()

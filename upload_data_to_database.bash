@@ -83,8 +83,10 @@ mounts="-B /homes -B /b -B /bscratch"
 apptainer_cmd="apptainer exec $mounts $apptainer_image"
 upload_script="scripts/upload_data.py"
 
+#Deleting docker image hash!
+rm -rf docker_image_digests.csv
 #First run Get docker image hash script
-#./get_docker_image_hash.sh
+./get_docker_image_hash.sh
 
 run_script="$apptainer_cmd python $upload_script --csv_file $csv_file --metadata_file $metadata_file --pointing_idx $pointing_idx --verbose"
 # Add your upload processing logic here

@@ -24,13 +24,12 @@ import glob
 from uncertainties import ufloat
 
 
-file_type_lookup_table = None
-
-# Function to read CSV data globally
-def create_file_type_lookup_table(file_path):
-    global file_type_lookup_table
-    file_type_lookup_table = pd.read_csv(file_path, header=0)
-    return file_type_lookup_table
+def load_lookup_table(file_path):
+    """Load a lookup table from a CSV file."""
+    if not os.path.isfile(file_path):
+        logging.error(f"File not found: {file_path}")
+        sys.exit(1)
+    return pd.read_csv(file_path, header=0)
 
 
 def calculate_spin(f=None, fdot=None, p=None, pdot=None):
@@ -380,7 +379,7 @@ class DataProductInputHandler:
 
 class DataProductOutputHandler:
 
-    def __init__(self, kafka_producer_dp_output, dp_output_topic: str, kafka_producer_search_candidate, search_cand_topic: str, kafka_producer_fold_candidate, fold_cand_topic: str, kafka_producer_candidate_tracker, candidate_tracker_topic: str):
+    def __init__(self, kafka_producer_dp_output, dp_output_topic: str, kafka_producer_search_candidate, search_cand_topic: str, kafka_producer_fold_candidate, fold_cand_topic: str, kafka_producer_candidate_tracker, candidate_tracker_topic: str, file_type_lookup_table: pd.DataFrame, candidate_filter_lookup_table: pd.DataFrame):
         self.kafka_producer_dp_output = kafka_producer_dp_output
         self.dp_output_topic = dp_output_topic
         self.kafka_producer_search_candidate = kafka_producer_search_candidate
@@ -389,6 +388,8 @@ class DataProductOutputHandler:
         self.fold_cand_topic = fold_cand_topic
         self.kafka_producer_candidate_tracker = kafka_producer_candidate_tracker
         self.candidate_tracker_topic = candidate_tracker_topic
+        self.file_type_lookup_table = file_type_lookup_table
+        self.candidate_filter_lookup_table = candidate_filter_lookup_table
 
     column_order = ['id', 'beam_id', 'file_type_id', 'filename', \
                     'filepath', 'filehash', 'available', 'metainfo', \
@@ -475,11 +476,11 @@ class DataProductOutputHandler:
 
         df = pd.DataFrame(rows)
         df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float})
-
+        
         return df
 
     
-    def xml_to_kafka_producer(self, xml_file, beam_id, hardware_id, dp_id):
+    def xml_to_kafka_producer(self, xml_file, beam_id, hardware_id, dp_id, candidate_filter_id=None):
 
         df = self.get_xml_cands(xml_file)
     
@@ -502,6 +503,9 @@ class DataProductOutputHandler:
             message['segment_start_sample'] = int(row['segment_start_sample'])
             message['segment_nsamples'] = int(row['segment_nsamples'])
             message['segment_pepoch'] = str(row['segment_pepoch'])
+
+            if candidate_filter_id:
+                message['candidate_filter_id'] = candidate_filter_id
             
             #Send to kafka
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
@@ -560,7 +564,7 @@ class DataProductOutputHandler:
     def pics_to_kafka_producer(self, results_csv_file):
         
         results = pd.read_csv(results_csv_file)
-        candidate_filter_df = pd.read_csv(GLOBAL_CANDIDATE_FILTER_FILE)
+
         if results.empty:
             logging.error(f"No output found in {search_fold_merged_file}")
         
@@ -573,7 +577,8 @@ class DataProductOutputHandler:
             model_name = os.path.splitext(basename)[0]
             for index, row in results.iterrows():
                 id_column = "cand_tracker_database_uuid_{}".format(model_name)
-                candidate_filter_id = int(candidate_filter_df.loc[candidate_filter_df['filename'] == basename, 'id'].values[0])
+                candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == model_name, 'id'].values[0])
+                #candidate_filter_id = int(candidate_filter_df.loc[candidate_filter_df['filename'] == basename, 'id'].values[0])
                 message = {}
                 message['id'] = UUIDUtility.convert_uuid_string_to_binary(row[id_column])
                 message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
@@ -586,16 +591,15 @@ class DataProductOutputHandler:
                 #Send to kafka
                 self.kafka_producer_candidate_tracker.produce_message(self.candidate_tracker_topic, message)
     
-    def alpha_beta_gamma_to_kafka_producer(self, results_csv_file):
+    def post_folding_heuristics_to_kafka_producer(self, results_csv_file):
             
         results = pd.read_csv(results_csv_file)
-        candidate_filter_df = pd.read_csv(GLOBAL_CANDIDATE_FILTER_FILE)
-        filters_to_iterate = ['alpha', 'beta', 'gamma']
+        filters_to_iterate = ['alpha', 'beta', 'gamma', 'delta']
         if results.empty:
             logging.error(f"No output found in {results_csv_file}")
         
         for filter_name in filters_to_iterate:
-            candidate_filter_id = int(candidate_filter_df.loc[candidate_filter_df['name'] == filter_name, 'id'].values[0])
+            candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == filter_name, 'id'].values[0])
             id_column = f'cand_tracker_database_uuid_{filter_name}'
             for index, row in results.iterrows():
                 message = {}
@@ -622,22 +626,28 @@ class DataProductOutputHandler:
         filename_list: str,
         output_dp_id_list: str,
         hardware_id: int,
-        file_type_table: pd.DataFrame,
         generate_file_hash=False,
         publish_dir=None,
         **optional_fields
     ):
         data_product_ids = output_dp_id_list.split()
         filenames = filename_list.split()
-        
+        if publish_dir is None:
+            filepaths = [workdir] * len(filenames)
+        else:
+            publish_dirs = publish_dir.split()
+            if len(publish_dirs) not in {1, len(filenames)}:
+                logging.error(f"Number of publish directories ({len(publish_dirs)}) does not match number of files ({len(filenames)})")
+                sys.exit(1)
+            filepaths = publish_dirs * len(filenames) if len(publish_dirs) == 1 else publish_dirs
 
-        for dp_id, filename in zip(data_product_ids, filenames):
+            
+        for dp_id, filename, filepath in zip(data_product_ids, filenames, filepaths):
             
             dp_uuid = UUIDUtility.convert_uuid_string_to_binary(dp_id)
-            filepath = publish_dir if publish_dir else workdir
             basename = os.path.basename(filename)
             file_extension = os.path.splitext(filename)[1].lstrip('.')
-            file_type_id = int(file_type_table.loc[file_type_table['name'] == file_extension, 'id'].values[0])
+            file_type_id = int(self.file_type_lookup_table.loc[self.file_type_lookup_table['name'] == file_extension, 'id'].values[0])
            
 
             if generate_file_hash:
@@ -692,9 +702,17 @@ class DataProductOutputHandler:
             
             #Send to kafka
             self.kafka_producer_dp_output.produce_message(self.dp_output_topic, message)
-            #If its an xml file, then we need to send the search candidate to the search candidate topic
+            #Send to search_candidate topic
             if file_extension == 'xml':
-               self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid)
+                candidate_filter_id = None
+
+                if taskname.startswith("candy_picker") and basename == 'output_rejected.xml':
+                    candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == 'candy_picker', 'id'].values[0])
+                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, candidate_filter_id)
+
+                if taskname.startswith("peasoup"):
+                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid)
+
         
         #PulsarX folds
         if taskname.startswith("pulsarx"):
@@ -718,15 +736,15 @@ class DataProductOutputHandler:
                 logging.error(f"File not found: {output_dp_file} ")
                 sys.exit(1)
             self.pics_to_kafka_producer(output_dp_file)
-        if taskname.startswith("calculate_alpha_beta_gamma"):
+        if taskname.startswith("post_folding_heuristics"):
             output_dp_file = f"{filepath}/{filename_list}" 
             if not os.path.isfile(output_dp_file):
                 logging.error(f"File not found: {output_dp_file} ")
                 sys.exit(1)
-            self.alpha_beta_gamma_to_kafka_producer(output_dp_file)
+            self.post_folding_heuristics_to_kafka_producer(output_dp_file)
 
 class JsonFileProcessor(FileSystemEventHandler):
-    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, kafka_producer_search_candidate, kafka_producer_fold_candidate, kafka_producer_candidate_tracker, processing_topic, dp_input_topic, dp_output_topic, search_cand_topic, fold_cand_topic, candidate_tracker_topic, read_existing=False):
+    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, kafka_producer_search_candidate, kafka_producer_fold_candidate, kafka_producer_candidate_tracker, processing_topic, dp_input_topic, dp_output_topic, search_cand_topic, fold_cand_topic, candidate_tracker_topic, file_type_lookup_table, candidate_filter_lookup_table, read_existing=False):
         super().__init__()
         self.directory = directory
         self.kafka_producer_processing = kafka_producer_processing
@@ -741,9 +759,11 @@ class JsonFileProcessor(FileSystemEventHandler):
         self.search_cand_topic = search_cand_topic
         self.fold_cand_topic = fold_cand_topic
         self.candidate_tracker_topic = candidate_tracker_topic
+        self.file_type_lookup_table = file_type_lookup_table
+        self.candidate_filter_lookup_table = candidate_filter_lookup_table
         self.read_existing = read_existing
         self.dp_inputs_handler = DataProductInputHandler(kafka_producer_dp_input, dp_input_topic)
-        self.dp_outputs_handler = DataProductOutputHandler(kafka_producer_dp_output, dp_output_topic, kafka_producer_search_candidate, search_cand_topic, kafka_producer_fold_candidate, fold_cand_topic, kafka_producer_candidate_tracker, candidate_tracker_topic)
+        self.dp_outputs_handler = DataProductOutputHandler(kafka_producer_dp_output, dp_output_topic, kafka_producer_search_candidate, search_cand_topic, kafka_producer_fold_candidate, fold_cand_topic, kafka_producer_candidate_tracker, candidate_tracker_topic, file_type_lookup_table, candidate_filter_lookup_table)
 
     def on_created(self, event):
         if event.is_directory or not event.src_path.endswith('.json'):
@@ -796,7 +816,6 @@ class JsonFileProcessor(FileSystemEventHandler):
                     filename_list = filtered_data_dp_outputs['filename'],
                     output_dp_id_list = filtered_data_dp_outputs['id'],
                     hardware_id = filtered_data_dp_outputs['hardware_id'],
-                    file_type_table = file_type_lookup_table,
                     filehash = filtered_data_dp_outputs.get('filehash'),
                     tsamp = filtered_data_dp_outputs.get('tsamp'),
                     tobs = filtered_data_dp_outputs.get('tobs'),
@@ -864,6 +883,14 @@ def main(config):
     kafka_producer_search_candidate = KafkaProducer(bootstrap_servers, schema_registry_url, search_cand_schema_file)
     kafka_producer_fold_candidate = KafkaProducer(bootstrap_servers, schema_registry_url, fold_cand_schema_file)
     kafka_producer_candidate_tracker = KafkaProducer(bootstrap_servers, schema_registry_url, candidate_tracker_schema_file)
+
+    #load lookup tables
+
+    file_type_lookup_table = load_lookup_table(config['file_type_lookup_table'])
+    candidate_filter_lookup_table = load_lookup_table(config['candidate_filter_lookup_table'])
+
+
+
     event_handler = JsonFileProcessor(
         directory=directory,
         kafka_producer_processing=kafka_producer_processing,
@@ -878,15 +905,12 @@ def main(config):
         search_cand_topic=search_cand_topic,
         fold_cand_topic=fold_cand_topic,
         candidate_tracker_topic=candidate_tracker_topic,
+        file_type_lookup_table=file_type_lookup_table,
+        candidate_filter_lookup_table=candidate_filter_lookup_table,
         read_existing=read_existing
     )
 
-    create_file_type_lookup_table(config['file_type_lookup_table'])
-
-    GLOBAL_CANDIDATE_FILTER_FILE = config['candidate_filter_lookup_table']
-    if not os.path.isfile(GLOBAL_CANDIDATE_FILTER_FILE):
-        logging.error(f"File not found: {GLOBAL_CANDIDATE_FILTER_FILE}")
-        sys.exit(1)
+    
 
 
 
