@@ -1,5 +1,5 @@
 nextflow.enable.dsl=2
-
+import groovy.json.JsonOutput
 
 process filtool {
     label 'filtool'
@@ -57,7 +57,7 @@ process peasoup {
     label 'peasoup'
     container params.apptainer_images.peasoup
     errorStrategy 'ignore'
-    maxForks 2
+    //maxForks 2
 
     input:
     tuple val(program_name),
@@ -197,10 +197,25 @@ process candy_picker{
         publish_dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${dirname}/${params.pipeline_name}/${cfg_name}/"
         publish_dir="\${publish_dir} \${publish_dirname}"
     done
-    echo "Publishing to \${publish_dir}"
-    echo "Output DP: \${output_dp}"
-    echo "Output DP ID: \${output_dp_id}"
 
+    # Convert to arrays
+    publish_dirs=(\$publish_dir)
+    output_dps=(\$output_dp)
+
+    # Ensure both have the same length
+    if [[ \${#publish_dirs[@]} -ne \${#output_dps[@]} ]]; then
+        echo "Error: Mismatch in the number of items between publish_dir and output_dp"
+        exit 1
+    fi
+
+    #Iterate and copy each output_dp to its respective publish_dir
+    for i in "\${!output_dps[@]}"; do
+        src="\${output_dps[\$i]}"
+        dest="\${publish_dirs[\$i]}"
+        echo "Copying \${src} to \${dest}"
+        cp \${src} \${dest}
+    done
+    
 
     """
 
@@ -209,7 +224,8 @@ process candy_picker{
 process pulsarx {
     label 'pulsarx'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
+    //maxForks 1
 
     errorStrategy { 
         if (task.attempt <= 3) {
@@ -227,7 +243,9 @@ process pulsarx {
           val(program_args), 
           val(pulsarx_id), 
           val(input_dp), 
-          val(input_dp_id), 
+          val(input_dp_id),
+          path(config_file), 
+          val(foldGroupName),
           val(target_name),
           val(beam_id),
           val(utc_start),
@@ -238,14 +256,15 @@ process pulsarx {
     
     output:
     //path(*.ar, *.png) are kept for downstream processes, and env (output_archives, outputplots) for the database.
-    tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr)
+    tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr)
 
     script:
     """
     #!/bin/bash
-    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/"
+    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
+    filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
-    python ${params.folding.fold_script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -n 3 -v --extra_args "${program_args.extra_args}" 
+    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} --extra_args "${program_args.extra_args}" 
     
     # Generate UUIDs for data_product DB Table
     fold_cands=\$(ls -v *.ar)
@@ -259,7 +278,6 @@ process pulsarx {
         fi
     done
     
-
     fold_dp_id=""
     for file in \$fold_cands; do
         uuid=\$(uuidgen)
@@ -275,7 +293,8 @@ process pulsarx {
         fold_candidate_id="\$fold_candidate_id \$uuid"
     done
 
-    python ${params.kafka.merged_fold_search} -p pulsarx -f \${fold_cands} -x ${input_dp} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
+    filtered_df_for_folding=\$(ls -v filtered_df_for_folding.csv)
+    python ${params.kafka.merged_fold_search} -p ${program_name} -f \${fold_cands} -x \${filtered_df_for_folding} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
     search_fold_merged=search_fold_merged.csv
     data_dir=\$(pwd)
 
@@ -295,7 +314,7 @@ process pulsarx {
 process pics{
     label 'pics'
     container "${params.apptainer_images.pics}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "*.csv", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.csv", mode: 'copy'
     //errorStrategy 'ignore'
     errorStrategy { 
         if (task.attempt <= 3) {
@@ -312,7 +331,8 @@ process pics{
           val(pipeline_id),
           val(hardware_id),
           path(archives), 
-          path(search_fold_merged), 
+          path(search_fold_merged),
+          val(foldGroupName), 
           path(pngs),
           val(input_dp), 
           val(input_dp_id), 
@@ -324,14 +344,14 @@ process pics{
           val(archive_source_dir)
           
     output:
-    tuple path("search_fold_pics_merged.csv"), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
+    tuple path("search_fold_pics_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
     script:
     """
     #!/bin/bash
     echo "Running PICS"
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/PICS/"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/PICS/"
     mkdir -p \${publish_dir}
-    python ${params.candidate_filter.ml_candidate_scoring.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_candidate_scoring.models_dir} -f ${search_fold_merged} -g -c -s ${archive_source_dir} -p \${publish_dir}
+    python ${params.candidate_filter.ml_candidate_scoring.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_candidate_scoring.models_dir} -f ${search_fold_merged} -g --create_shortlist_csv -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_pics_merged.csv"
     output_dp_id=\$(uuidgen)
 
@@ -342,8 +362,8 @@ process pics{
 process post_folding_heuristics{
     label 'post_folding_heuristics'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
+    //publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
 
     //errorStrategy 'ignore'
 
@@ -362,7 +382,8 @@ process post_folding_heuristics{
           val(pipeline_id),
           val(hardware_id),
           path(archives), 
-          path(search_fold_merged), 
+          path(search_fold_merged),
+          val(foldGroupName), 
           path(pngs),
           val(input_dp), 
           val(input_dp_id), 
@@ -374,13 +395,14 @@ process post_folding_heuristics{
           val(archive_source_dir)
           
     output:
-    tuple path("search_fold_alpha_beta_gamma_merged.csv"), path("DM0*.png"), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
+    tuple path("search_fold_alpha_beta_gamma_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
     script:
     """
     #!/bin/bash
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/ID_GT300_NH_GT2/"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     mkdir -p \${publish_dir}
-    python ${params.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.calculate_post_folding_heuristics.alpha_snr_threshold} -c -g -s ${archive_source_dir} -p \${publish_dir}
+
+    python ${params.candidate_filter.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.candidate_filter.calculate_post_folding_heuristics.alpha_snr_threshold} --create_shortlist_csv -g -s ${archive_source_dir} -p \${publish_dir}
     output_dp="search_fold_alpha_beta_gamma_merged.csv"
     output_dp_id=\$(uuidgen)
     """
@@ -492,6 +514,14 @@ workflow {
                 program_id   : dp.program_id
             ] ]
         }
+    
+    //Dump the fold configuration to a JSON file.
+
+    def fold_config = JsonOutput.prettyPrint(JsonOutput.toJson(params.folding.configuration))
+    def pulsarx_fold_config = file("pulsarx_fold_config.json")
+    pulsarx_fold_config.text = fold_config
+
+    def foldGroupName = params.folding.configuration.keySet().iterator().next()
 
     if (params.candidate_filter.candy_picker.enable == 1){
 
@@ -633,6 +663,8 @@ workflow {
                 program_id       : pulsarx_map.program_id,
                 input_dp         : candy_picker_map.output_dp,
                 input_dp_id      : candy_picker_map.output_dp_id,
+                fold_config      : pulsarx_fold_config,
+                foldGroupName    : foldGroupName,
                 target_name      : candy_picker_map.target_name,
                 beam_id          : candy_picker_map.beam_id,
                 utc_start        : candy_picker_map.utc_start,
@@ -671,6 +703,8 @@ workflow {
             program_id       : pulsarx_map.program_id,
             input_dp         : peasoup_map.output_dp,
             input_dp_id      : peasoup_map.output_dp_id,
+            fold_config      : pulsarx_fold_config,
+            foldGroupName    : foldGroupName,
             target_name      : peasoup_map.target_name,
             beam_id          : peasoup_map.beam_id,
             utc_start        : peasoup_map.utc_start,
@@ -682,58 +716,60 @@ workflow {
     }
 
     }
-    pulsarx_input.view()
 
-//     pulsarx_output = pulsarx(pulsarx_input)
+    //Fold with pulsarx
+    pulsarx_output = pulsarx(pulsarx_input)
 
-//     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
+    if (params.candidate_filter.ml_candidate_scoring.enable == 1){
 
-//         pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "pics",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir,
-//             ]
+        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "pics",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pulsarx_batch_name : pulsarx_batch_name,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir
+            ]
             
-//         }
-//        pics_output = pics(pics_input)
+        }
+       pics_output = pics(pics_input)
 
 
-//     }
-//     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
+    }
+    if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
-//         calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "alpha_beta_gamma",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir,
-//             ]
+        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "alpha_beta_gamma",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pulsarx_batch_name : pulsarx_batch_name,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir
+            ]
             
-//         }
+        }
         
-//         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
-// }
+        post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
+}
 }
 

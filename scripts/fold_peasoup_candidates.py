@@ -9,6 +9,8 @@ import shlex
 import threading
 from multiprocessing import Pool, cpu_count
 import re
+import json
+
 ###############################################################################
 # Logging Setup
 ###############################################################################
@@ -66,6 +68,90 @@ def immediate_stream_output(pipe, logger, log_level=logging.INFO):
             logger.log(log_level, line.rstrip('\n'))
     finally:
         pipe.close()
+
+###############################################################################
+# Pre-Select Candidates based on JSON Configuration
+###############################################################################
+
+def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFrame:
+    """
+    Filter candidates from the dataframe based on the folding configuration
+    specified in the JSON config file.
+
+    The configuration file is expected to have the following structure:
+    {
+        "first_run": [
+            {
+                "spin_period": {"min": X, "max": Y},
+                "dm": {"min": X, "max": Y},
+                "fft_snr": {"min": X, "max": Y},
+                "nh": {"min": X, "max": Y},
+                "acc": {"min": X, "max": Y},
+                "total_cands_limit": N
+            },
+            ...
+        ]
+    }
+
+    For each filter, rows in `df` are selected if:
+      - period is between spin_period.min and spin_period.max,
+      - dm is between dm.min and dm.max,
+      - snr is between fft_snr.min and fft_snr.max,
+      - nh is between nh.min and nh.max,
+      - acc is between acc.min and acc.max.
+
+    Only up to total_cands_limit rows are selected per filter.
+    The filtered candidates from all filters are then concatenated and duplicates dropped.
+
+    Args:
+        df: DataFrame containing candidate data.
+        config_file: Path to JSON configuration file.
+    
+    Returns:
+        A DataFrame with pre-selected candidates.
+    """
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+    
+    # Assuming one group key; e.g., "first_run"
+    group_key = list(config.keys())[0]
+    filters = config[group_key]
+
+    
+    filtered_dfs = []
+    for filter_def in filters:
+        # Apply filter conditions
+        sel = df.loc[
+            (df['period'].between(filter_def['spin_period']['min'], filter_def['spin_period']['max'])) &
+            (df['dm'].between(filter_def['dm']['min'], filter_def['dm']['max'])) &
+            (df['snr'].between(filter_def['fft_snr']['min'], filter_def['fft_snr']['max'])) &
+            (df['nh'].between(filter_def['nh']['min'], filter_def['nh']['max'])) &
+            (df['acc'].between(filter_def['acc']['min'], filter_def['acc']['max']))
+        ]
+        logging.info(f"Filter {filter_def} selected {len(sel)} candidates.")
+        # Limit to the desired number of candidates
+        limit = filter_def.get('total_cands_limit', None)
+        if limit is not None and len(sel) > limit:
+            logging.info(f"Filter {filter_def} returned more candidates than the limit {limit}. Truncating to {limit} for folding.")
+            sel = sel.head(limit)
+        
+        
+        filtered_dfs.append(sel)
+    
+    if filtered_dfs:
+        # Concatenate and drop duplicate candidates (assuming cand_id_in_file is unique)
+        df_filtered = pd.concat(filtered_dfs)
+        logging.info(f"Total candidates after Concatenation: {len(df_filtered)}")
+        df_filtered = df_filtered.drop_duplicates(subset='cand_id_in_file')
+        df_filtered = df_filtered.sort_values(by='cand_id_in_file')
+        logging.info(f"Total candidates after dropping duplicates: {len(df_filtered)}")
+        return df_filtered
+    else:
+        return df
+
+
+
+
 
 ###############################################################################
 # PulsarX Candidate File
@@ -283,8 +369,6 @@ def main():
     parser.add_argument('-m', '--mask_file', help='Mask file for prepfold', type=str)
     parser.add_argument('-t', '--fold_technique', help='Technique to use for folding (presto or pulsarx)',
                         type=str, default='pulsarx')
-    parser.add_argument('-n', '--nh', help='Filter candidates with nh value',
-                        type=int, default=0)
     parser.add_argument('-u', '--nbins_high', help='Upper profile bin limit for slow-spinning pulsars',
                         type=int, default=128)
     parser.add_argument('-l', '--nbins_low', help='Lower profile bin limit for fast-spinning pulsars',
@@ -311,7 +395,11 @@ def main():
                         type=str, default='meerkat_fold.template')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Enable verbose (DEBUG) logging')
-
+    parser.add_argument('-f', '--filterbank_publish_dir', help='Optional Path to filterbank publish directory. If None, use dir in XML file',
+                        type=str, default=None)
+    parser.add_argument('--config_file', type=str, help="Path to JSON configuration file to pre-select candidates to fold.", default=None)
+    parser.add_argument('--filtered_candidates_file', type=str, default="filtered_df_for_folding.csv",
+                    help="Path to CSV file for pre-selected candidates for folding.")
     # New arguments for pepoch, start_frac, end_frac overrides, and extra arguments
     parser.add_argument('--pepoch_override', type=float, default=None,
                         help='Override Pepoch value. If not provided, read from XML.')
@@ -389,17 +477,30 @@ def main():
         rows.append(cand_dict)
 
     df = pd.DataFrame(rows)
-    df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int})
-    logging.info(f"Skipping first 300 candidates. They were folded earlier")
-    #Get candidates after row 300
-    df = df.iloc[300:]
+    if args.filterbank_publish_dir:
+        filterbank_publish_dir = args.filterbank_publish_dir
+    else:
+        filterbank_publish_dir = os.path.dirname(filterbank_file)
+    
+    publish_filterbank_file = os.path.join(filterbank_publish_dir, os.path.basename(filterbank_file))
+    df['filterbank_file'] = publish_filterbank_file
+    df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "cand_id_in_file": int})
 
-    df = df[df['nh'] >= args.nh]
+    # If a config file is provided, filter the dataframe accordingly
+    if args.config_file:
+        logging.info(f"XML file contains {len(df)} candidates before filtering.")
+        logging.info(f"Applying folding configuration from {args.config_file}")
+        df = apply_folding_configuration(df, args.config_file)
+        logging.info(f"After filtering, {len(df)} candidates remain for folding.")
+    else:
+        logging.info(f"No configuration file provided, folding all {len(df)} candidates.")
     
-    logging.info(f"Number of candidates after filtering nh greater than equal to {args.nh}: {len(df.index)}")
     
-    # Limit to 300 candidates
-    #df = df.head(300)
+    #Dump the candidates selected for folding to a CSV
+    logging.info(f"Dumping the selected candidates to filtered_df_for_folding.csv")
+    df.to_csv(args.filtered_candidates_file, index=False, float_format='%.18f')
+
+    
     PulsarX_Template = args.pulsarx_fold_template
 
     if args.fold_technique == 'presto':

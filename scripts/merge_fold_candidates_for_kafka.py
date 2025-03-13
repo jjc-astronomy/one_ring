@@ -24,53 +24,18 @@ def calculate_spin(f=None, fdot=None, p=None, pdot=None):
         raise ValueError("Either (f, fdot) or (p, pdot) must be provided")
     return f, fdot, p, pdot
 
-def get_xml_cands(xml_file):
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
-    header_params = root[1]
-    search_params = root[2]
-    candidates = root[7]
 
-    filterbank_file = str(search_params.find("infilename").text)
-    tsamp = float(header_params.find("tsamp").text)
-    fft_size = int(search_params.find("size").text)
-    nsamples = int(root.find("header_parameters/nsamples").text)
-    tstart = float(header_params.find("tstart").text)
-    source_name_prefix = str(header_params.find("source_name").text).strip()
-    
-    ignored_entries = ['candidate', 'opt_period', 'folded_snr', 'byte_offset', 'is_adjacent', 'is_physical']
-    rows = []
-    for candidate in candidates:
-        cand_dict = {}
-        for cand_entry in candidate.iter():
-            if cand_entry.tag not in ignored_entries:
-                cand_dict[cand_entry.tag] = cand_entry.text
-        cand_dict['cand_id_in_file'] = candidate.attrib.get("id")
-        rows.append(cand_dict)
-
-    df = pd.DataFrame(rows)
-    df = df.astype({
-        "snr": float, "dm": float, "period": float, "nh": int, "acc": float,
-        "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float, "cand_id_in_file": int
-    })
-
-    return df
-
-def pulsarx_to_kafka_message_format(filenames, pulsarx_cand_file, xml_file, data_product_ids, fold_candidates_database_uuid_list, output_file):
+def pulsarx_to_kafka_message_format(filenames, pulsarx_cand_file, search_candidates_file, data_product_ids, fold_candidates_database_uuid_list, output_file):
     fold_data = pd.read_csv(pulsarx_cand_file, skiprows=11, sep='\s+')
     fold_data['fold_dp_output_uuid'] = data_product_ids
     fold_data['fold_candidates_database_uuid'] = fold_candidates_database_uuid_list
     fold_data['fold_cands_filename'] = filenames
-    search_data = get_xml_cands(xml_file)
-    #Temporary fix to remove the first 300 candidates
-    search_data = search_data.iloc[300:]
-    search_data = search_data.loc[search_data['nh'] >= 3]
-    search_data = search_data.reset_index(drop=True)
+    search_data = pd.read_csv(search_candidates_file)
     #index is matching key
-    search_data['cand_id_in_file_match'] = search_data.index + 1
-    #search_data['cand_id_in_file_match'] = search_data['cand_id_in_file'] + 1
-    df = pd.merge(fold_data, search_data, left_on='#id', right_on='cand_id_in_file_match', how='inner')
-    del df['cand_id_in_file_match']
+    search_data['index'] = search_data.index + 1
+    df = pd.merge(fold_data, search_data, left_on='#id', right_on='index', how='inner')
+    del df['index']
+   
     f, fdot, p, pdot = calculate_spin(f=df['f0_new'].values, fdot=df['f1_new'].values)
     df['p0_new'] = p
     df['p1_new'] = pdot
@@ -84,7 +49,7 @@ def pulsarx_to_kafka_message_format(filenames, pulsarx_cand_file, xml_file, data
         "p0_new": float, "p1_new": float, "search_candidates_database_uuid": str
     })
     
-    df.to_csv(output_file, index=False)
+    df.to_csv(output_file, index=False, float_format='%.18f')
 
 def presto_kafka_message_format(pfd_files, xml_file, data_product_ids, fold_candidates_database_uuid_list, output_file):
     fold_data = []
@@ -147,7 +112,7 @@ def main():
     parser.add_argument("-p", "--process_name", choices=["pulsarx", "presto"], required=True, help="Name of the process to execute")
     parser.add_argument("-f", "--filenames", nargs='+', required=True, help="List of filenames to process")
     parser.add_argument("-c", "--pulsarx_cand_file", help="PulsarX candidate file")
-    parser.add_argument("-x", "--xml_file", required=True, help="XML file with candidate data")
+    parser.add_argument("-x", "--filtered_search_csv", required=True, help="Search CSV candidates selected from XML for folding")
     parser.add_argument("-d", "--data_product_ids", nargs='+', required=True, help="Data product IDs")
     parser.add_argument("-u", "--fold_cands_database_uuid", nargs='+', required=True, help="Fold candidates database UUID")
     parser.add_argument("-o", "--output_file", help="Output file name", default="search_fold_merged.csv")
@@ -157,15 +122,13 @@ def main():
     if args.process_name == "pulsarx":
         logging.info("Processing with PulsarX format")
         pulsarx_to_kafka_message_format(
-            args.filenames, args.pulsarx_cand_file, args.xml_file,
+            args.filenames, args.pulsarx_cand_file, args.filtered_search_csv,
             args.data_product_ids, args.fold_cands_database_uuid, args.output_file
         )
     elif args.process_name == "presto":
         logging.info("Processing with Presto format")
-        presto_kafka_message_format(
-            args.filenames, args.xml_file, args.data_product_ids,
-            args.fold_cands_database_uuid, args.output_file
-        )
+        logging.info("Not implemented yet")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

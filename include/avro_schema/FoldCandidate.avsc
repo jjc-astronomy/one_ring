@@ -101,6 +101,11 @@
       "name": "segment_pepoch",
       "type": ["null", "string"],
       "default": null
+    },
+    {
+      "name": "batch_name",
+      "type": ["null", "string"],
+      "default": null
     }
 
   ]

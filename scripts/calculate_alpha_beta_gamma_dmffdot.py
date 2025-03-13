@@ -127,6 +127,10 @@ def main():
         help="Create symlinks to publishdir."
     )
 
+    parser.add_argument('--create_shortlist_csv', action='store_true', 
+    help='Create shortlist csv containing paths to publishdir')
+
+
     parser.add_argument(
         "-s", "--sourcedir", default=os.getcwd(),
         help="Source directory for symlinks. Default is the current working directory."
@@ -159,6 +163,10 @@ def main():
         df['beta'] = np.nan
         df['gamma'] = np.nan
 
+    if {'p0_new', 'p1_new', 'p0_old', 'p1_old'}.issubset(df.columns):
+        df['delta'] = np.sqrt((df['p0_new'] - df['p0_old'])**2 + (df['p1_new'] - df['p1_old'])**2)
+    else:
+        df['delta'] = np.nan
     # Create columns for DM=0 outputs (NaN by default)
     df['zero_dm_filename'] = np.nan
     df['zero_dm_snr'] = np.nan
@@ -227,6 +235,8 @@ def main():
         df[uuid_col_name] = UUIDUtility.generate_uuid_list(len(df))
         uuid_col_name = "cand_tracker_database_uuid_gamma"
         df[uuid_col_name] = UUIDUtility.generate_uuid_list(len(df))
+        uuid_col_name = "cand_tracker_database_uuid_delta"
+        df[uuid_col_name] = UUIDUtility.generate_uuid_list(len(df))
         logging.info("UUIDs generated.")
 
     ###########################################################################
@@ -234,8 +244,37 @@ def main():
     ###########################################################################
     df.to_csv(args.output_csv, index=False)
     logging.info(f"Wrote zero-DM results to {args.output_csv}.")
+
     ###########################################################################
-    # 7) Create symlinks if requested
+    # 7) Create shortlist CSV if requested
+    ###########################################################################
+
+    if args.create_shortlist_csv:
+        logging.info("Creating shortlist CSV.")
+        try:
+            os.makedirs(args.publishdir, exist_ok=True)
+
+            # Define thresholds and labels for symlinks
+            thresholds = {
+                'alpha': [0.25, 0.5, 1.0],
+                'beta': [0.20],
+                'gamma': [0.5, 1.0]
+            }
+            for key, threshold_list in thresholds.items():
+                for thresh in threshold_list:
+                    shortlist = df.loc[df[key] <= thresh, 'fold_cands_filename'].tolist()
+                    png_filenames = [os.path.splitext(f)[0] + '.png' for f in shortlist]
+                    output_dir = os.path.join(args.publishdir, f"{key}_below_{thresh}")
+                    output_file = os.path.join(output_dir, 'shortlist.csv')
+                    os.makedirs(output_dir, exist_ok=True)
+                    png_output_filenames = [os.path.join(args.sourcedir, os.path.basename(f)) for f in png_filenames]
+                    with open(output_file, 'w') as f:
+                        f.write("\n".join(png_output_filenames) + "\n")
+        except Exception as e:
+            logging.error(f"Overall shortlist creation failed. Reason: {e}")
+        
+    ###########################################################################
+    # 8) Create symlinks if requested
     ###########################################################################
 
     if args.create_symlinks:

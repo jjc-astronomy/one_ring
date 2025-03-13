@@ -50,7 +50,7 @@ def run_pics_sequential(filenames, pics_model, model_name):
     df = pd.DataFrame({'filename': filenames, model_name: AI_scores})
     return df
 
-def main(input_dir, pics_model_dir, fold_csv, fold_cands_col, generate_uuid, create_symlinks, sourcedir, publishdir, verbose):
+def main(input_dir, pics_model_dir, fold_csv, fold_cands_col, generate_uuid, create_symlinks, create_shortlist_csv, sourcedir, publishdir, verbose):
     logging.info("Searching for input files (.pfd, .ar, .ar2) in %s", input_dir)
     filenames = (
         glob.glob(os.path.join(input_dir, '*.pfd')) +
@@ -81,13 +81,30 @@ def main(input_dir, pics_model_dir, fold_csv, fold_cands_col, generate_uuid, cre
         if generate_uuid:
             uuid_col_name = "cand_tracker_database_uuid_{}".format(model_name)
             df[uuid_col_name] = UUIDUtility.generate_uuid_list(len(df))
-            #df[uuid_col_name] = [UUIDUtility.generate_uuid_string() for _ in range(len(df))]
         
         #Change filename to basename
         df['filename'] = df['filename'].apply(os.path.basename)
         master_df['filename'] = master_df['filename'].apply(os.path.basename)
         master_df = pd.merge(master_df, df, on='filename', how='left')
         logging.info("Merged model %s into master_df." % model_name)
+        #If user requested shortlist csv, create it
+        if create_shortlist_csv:
+            logging.info("Creating shortlist CSV for model %s", model_name)
+            
+            shortlist = df.loc[df[model_name] >= 0.1, 'filename'].tolist()
+            png_filenames = [os.path.splitext(f)[0] + '.png' for f in shortlist]
+
+            output_dir = os.path.join(publishdir, model_name)
+            output_file = os.path.join(output_dir, 'shortlist.csv')
+            mkdir_p(output_dir)
+
+            png_output_filenames = [os.path.join(sourcedir, os.path.basename(f)) for f in png_filenames]
+
+            with open(output_file, 'w') as f:
+                f.write("\n".join(png_output_filenames) + "\n")
+
+            
+
         # If user requested symlinks, create them in publishdir
         if create_symlinks:
             logging.info("Creating symlinks to publishdir")
@@ -149,7 +166,8 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--generate_uuid', action='store_true', 
                         help='Generate a unique UUID string for each candidate in each model.')
     parser.add_argument('-c', '--create_symlinks', action='store_true', help='Create symlinks to publishdir')
-    parser.add_argument('-s', '--sourcedir', help='Source Directory for symlinks', default=os.getcwd())
+    parser.add_argument('--create_shortlist_csv', action='store_true', help='Create shortlist csv containing paths to publishdir')
+    parser.add_argument('-s', '--sourcedir', help='Source Directory for symlinks and shortlist CSV', default=os.getcwd())
     parser.add_argument('-p', '--publishdir', help='Directory to create symlinks in', default='publishdir')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose logging.')
    
@@ -158,4 +176,4 @@ if __name__ == "__main__":
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
 
-    main(args.input_dir, args.model_dir, args.fold_csv, args.fold_cands_col, args.generate_uuid, args.create_symlinks, args.sourcedir, args.publishdir, args.verbose)
+    main(args.input_dir, args.model_dir, args.fold_csv, args.fold_cands_col, args.generate_uuid, args.create_symlinks, args.create_shortlist_csv, args.sourcedir, args.publishdir, args.verbose)

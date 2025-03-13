@@ -154,8 +154,8 @@ class ProcessDataParser:
             },
             'COMPLETED': {
                 'top_level': ['session_id', 'run_name', 'task_id', 'status', 'attempt', 'submit', 'start', 'complete', 'workdir', 'task_name'],
-                'inputs': ['pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name', 'input_dp', 'input_dp_id', 'process_input_dp_id'],
-                'outputs': ['output_dp', 'output_dp_id', 'publish_dir', 'fft_size', 'tsamp', 'tobs', 'nsamples', 'freq_start_mhz', 'freq_end_mhz', 'tstart', 'tstart_utc', 'nchans', 'nbits', 'foff', 'locked', 'filehash', 'metainfo', 'pulsarx_cands_file', 'fold_candidate_id', 'search_fold_merged', 'coherent_dm', 'subband_dm']
+                'inputs': ['pipeline_id', 'hardware_id', 'beam_id', 'filtool_id', 'peasoup_id', 'pulsarx_id', 'prepfold_id', 'circular_orbit_search_id', 'elliptical_orbit_search_id', 'rfifind_id', 'candidate_filter_id', 'execution_order', 'program_name', 'input_dp', 'input_dp_id', 'process_input_dp_id', 'foldGroupName'],
+                'outputs': ['output_dp', 'output_dp_id', 'publish_dir', 'fft_size', 'tsamp', 'tobs', 'nsamples', 'freq_start_mhz', 'freq_end_mhz', 'tstart', 'tstart_utc', 'nchans', 'nbits', 'foff', 'locked', 'filehash', 'metainfo', 'pulsarx_cands_file', 'fold_candidate_id', 'search_fold_merged', 'coherent_dm', 'subband_dm', 'foldGroupName']
             },
             'FAILED': {
                 'top_level': ['session_id', 'run_name', 'task_id', 'status', 'attempt', 'submit', 'start', 'complete', 'workdir', 'task_name'],
@@ -395,7 +395,7 @@ class DataProductOutputHandler:
                     'filepath', 'filehash', 'available', 'metainfo', \
                     'locked', 'utc_start', 'tsamp', 'tobs', 'nsamples', \
                     'freq_start_mhz', 'freq_end_mhz',   \
-                    'hardware_id', 'mjd_start', 'fft_size', 'nchans', 'nbits', 'coherent_dm', 'subband_dm', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged', 'publish_dir']
+                    'hardware_id', 'mjd_start', 'fft_size', 'nchans', 'nbits', 'coherent_dm', 'subband_dm', 'process_status', 'workdir', 'pulsarx_cands_file', 'input_dp', 'input_dp_id', 'fold_candidate_id', 'search_fold_merged', 'publish_dir', 'foldGroupName']
     
     rename_columns = {
         'output_dp_id': 'id',
@@ -510,7 +510,7 @@ class DataProductOutputHandler:
             #Send to kafka
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
     
-    def pulsarx_to_kafka_producer(self, results_csv_file):
+    def pulsarx_to_kafka_producer(self, results_csv_file, fold_batch_name=None):
         
         results = pd.read_csv(results_csv_file)
         if results.empty:
@@ -531,7 +531,8 @@ class DataProductOutputHandler:
             message['fold_snr'] = row['S/N_new']
             message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
             message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
-            
+            if fold_batch_name:
+                message['batch_name'] = fold_batch_name
 
             
             #Send to kafka
@@ -568,9 +569,9 @@ class DataProductOutputHandler:
         if results.empty:
             logging.error(f"No output found in {search_fold_merged_file}")
         
-        ml_models = glob.glob("include/ml_models/*.pkl")
+        ml_models = glob.glob("../include/ml_models/*.pkl")
         if not ml_models:
-            logging.error("No ML models found in include/ml_models")
+            logging.error("No ML models found in ../include/ml_models")
             sys.exit()
         for model in ml_models:
             basename = os.path.basename(model)
@@ -717,10 +718,15 @@ class DataProductOutputHandler:
         #PulsarX folds
         if taskname.startswith("pulsarx"):
             search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
+            
             if not os.path.isfile(search_fold_merged_file):
                 logging.error(f"File not found: {search_fold_merged_file} ")
                 sys.exit(1)
-            self.pulsarx_to_kafka_producer(search_fold_merged_file)
+            
+            fold_batch_name = optional_fields.get('foldGroupName', None)   
+                  
+            self.pulsarx_to_kafka_producer(search_fold_merged_file, fold_batch_name)
+            
         if taskname.startswith("prepfold"):
             search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
             if not os.path.isfile(search_fold_merged_file):
@@ -832,7 +838,8 @@ class JsonFileProcessor(FileSystemEventHandler):
                     coherent_dm = filtered_data_dp_outputs.get('coherent_dm'),
                     subband_dm = filtered_data_dp_outputs.get('subband_dm'),
                     search_fold_merged = filtered_data_dp_outputs.get('search_fold_merged'),
-                    publish_dir = filtered_data_dp_outputs.get('publish_dir')
+                    publish_dir = filtered_data_dp_outputs.get('publish_dir'),
+                    foldGroupName = filtered_data_dp_outputs.get('foldGroupName')
 
                 )
 
