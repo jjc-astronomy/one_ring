@@ -362,8 +362,7 @@ process pics{
 process post_folding_heuristics{
     label 'post_folding_heuristics'
     container "${params.apptainer_images.pulsarx}"
-    //publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/zero_dm_pngs/", pattern: "DM0*.png", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "search_fold_alpha_beta_gamma_merged.csv", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "search_postfold_heuristics_merged.csv", mode: 'copy'
 
     //errorStrategy 'ignore'
 
@@ -395,7 +394,7 @@ process post_folding_heuristics{
           val(archive_source_dir)
           
     output:
-    tuple path("search_fold_alpha_beta_gamma_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
+    tuple path("search_postfold_heuristics_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
     script:
     """
     #!/bin/bash
@@ -403,7 +402,7 @@ process post_folding_heuristics{
     mkdir -p \${publish_dir}
 
     python ${params.candidate_filter.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.candidate_filter.calculate_post_folding_heuristics.alpha_snr_threshold} --create_shortlist_csv -g -s ${archive_source_dir} -p \${publish_dir}
-    output_dp="search_fold_alpha_beta_gamma_merged.csv"
+    output_dp="search_postfold_heuristics_merged.csv"
     output_dp_id=\$(uuidgen)
     """
 }
@@ -750,7 +749,7 @@ workflow {
 
         calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
             [
-                program_name    : "alpha_beta_gamma",
+                program_name    : "post_folding_heuristics",
                 pipeline_id     : params.pipeline_id,
                 hardware_id     : filtool_prog.data_products[0].hardware_id,
                 output_archives : archives,

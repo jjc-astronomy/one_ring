@@ -11,6 +11,7 @@ from astropy.io import fits
 from multiprocessing import Pool, cpu_count
 from uuid_utils import UUIDUtility
 
+
 def setup_logging(verbose=False):
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=log_level, format='%(levelname)s: %(message)s')
@@ -103,7 +104,7 @@ def main():
     )
 
     parser.add_argument(
-        "-o", "--output_csv", default="search_fold_alpha_beta_gamma_merged.csv",
+        "-o", "--output_csv", default="search_postfold_heuristics_merged.csv",
         help="Final output CSV after zero-DM refolding."
     )
 
@@ -164,7 +165,9 @@ def main():
         df['gamma'] = np.nan
 
     if {'p0_new', 'p1_new', 'p0_old', 'p1_old'}.issubset(df.columns):
-        df['delta'] = np.sqrt((df['p0_new'] - df['p0_old'])**2 + (df['p1_new'] - df['p1_old'])**2)
+        p0_distance_in_sigma = (df['p0_new'] - df['p0_old']) / df['p0_err']
+        p1_distance_in_sigma = (df['p1_new'] - df['p1_old']) / df['p1_err']
+        df['delta'] = np.sqrt(p0_distance_in_sigma**2 + p1_distance_in_sigma**2)
     else:
         df['delta'] = np.nan
     # Create columns for DM=0 outputs (NaN by default)

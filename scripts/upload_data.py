@@ -474,7 +474,7 @@ class DatabaseUploader:
                     "alpha": "S/N at ZERO DM/S/N at candidate DM",
                     "beta": "ABS(DM_FFT - DM_FOLD)/DM_FFT",
                     "gamma": "DM_ERR/DM_FOLD",
-                    "delta": "sqrt((P_FFT - P_FOLD)**2 + (Pdot_FFT - Pdot_FOLD)**2)"
+                    "delta": "SQRT(((P_FFT - P_FOLD)/P_FOLD_ERR)**2 + ((Pdot_FFT - Pdot_FOLD)/PDOT_FOLD_ERR)**2)"
                 }
                 entries = {
                     key: {**self.create_entry(key, desc, filtool_params), "type": program_type}
