@@ -25,7 +25,7 @@ import csv
 from pathlib import Path
 
 
-load_dotenv(dotenv_path=Path('.testdb.env'))
+load_dotenv(dotenv_path=Path('.compactdb.env'))
 
 
 class WorkflowJSONBuilder:

@@ -1,4 +1,4 @@
-directory: "/bscratch/vishnu/M28_PROCESSING/LIVE_PROGRESS/"  # Null implies use the script's directory with 'results/' appended
+directory: "/bscratch/vishnu/NGC1851_PROCESSING/LIVE_PROGRESS/"  # Null implies use the script's directory with 'results/' appended
 file_type_lookup_table: "../lookup_tables/file_type.csv"
 candidate_filter_lookup_table: "../lookup_tables/candidate_filter.csv"
 bootstrap_servers: "localhost:9092"

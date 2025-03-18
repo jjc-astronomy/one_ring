@@ -548,24 +548,40 @@ workflow {
         //beam name -> 5 (Using beam name is optional given that beam id is unique)
         //same search configuration eg full,half segment searches -> 7
         // Candy pickers runs on same beam, cdm but different subband_dm
-        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list ->
+        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list ->
                 
+            // Sort coherent_dm in ascending order along with the corresponding lists to guarantee consistent ordering
+            def combined = []
+            (0..<coherent_dm.size()).each { i ->
+                combined << [cdm: new BigDecimal(coherent_dm[i].toString()), xml: xml_list[i], xml_dp: xml_dp_id_list[i], filstr: filstr_list[i]]
+            }
+            def combined_sorted = combined.sort { a, b -> a.cdm <=> b.cdm }
+            def sorted_coherent_dm = combined_sorted.collect { it.cdm }
+            def sorted_xml_list = combined_sorted.collect { it.xml }
+            def sorted_xml_dp_id_list = combined_sorted.collect { it.xml_dp }
+            def sorted_filstr_list = combined_sorted.collect { it.filstr }
+
             return [
                 program_name : 'candy_picker',
                 pipeline_id  : params.pipeline_id,
                 hardware_id  : filtool_prog.data_products[0].hardware_id,
-                input_dp     : xml_list.join(" "),
-                input_dp_id  : xml_dp_id_list.join(" "),
+                input_dp     : sorted_xml_list.join(" "),
+                input_dp_id  : sorted_xml_dp_id_list.join(" "),
                 target_name  : target_name,
                 beam_id      : beam_id,
                 utc_start    : utc_start,
                 beam_name    : beam_name,
-                coherent_dm  : coherent_dm,
+                coherent_dm  : sorted_coherent_dm,
                 cfg_name     : cfg_name,
-                filstr       : filstr_list.join(" "),
-                segment_pepoch_list : segment_pepoch_list[0]
+                filstr       : sorted_filstr_list.join(" "),
+                segment_pepoch : segment_pepoch[0]
             ]
+            
         }
+
+
+
+
 
         candy_picker_output = candy_picker(candy_picker_input)
 
