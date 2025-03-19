@@ -733,58 +733,58 @@ workflow {
     }
 
     //Fold with pulsarx
-//     pulsarx_output = pulsarx(pulsarx_input)
+    pulsarx_output = pulsarx(pulsarx_input)
 
-//     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
+    if (params.candidate_filter.ml_candidate_scoring.enable == 1){
 
-//         pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "pics",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pulsarx_batch_name : pulsarx_batch_name,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir
-//             ]
+        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "pics",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pulsarx_batch_name : pulsarx_batch_name,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir
+            ]
             
-//         }
-//        pics_output = pics(pics_input)
+        }
+       pics_output = pics(pics_input)
 
 
-//     }
-//     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
+    }
+    if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
-//         calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
-//             [
-//                 program_name    : "post_folding_heuristics",
-//                 pipeline_id     : params.pipeline_id,
-//                 hardware_id     : filtool_prog.data_products[0].hardware_id,
-//                 output_archives : archives,
-//                 search_fold_merged : search_fold_merged_path,
-//                 pulsarx_batch_name : pulsarx_batch_name,
-//                 pngs : pngs,
-//                 output_dp : output_dp,
-//                 output_dp_id : output_dp_id,
-//                 target_name : target_name,
-//                 beam_id : beam_id,
-//                 utc_start : utc_start,
-//                 cfg_name : cfg_name,
-//                 filstr : filstr,
-//                 archive_source_dir : publish_dir
-//             ]
+        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+            [
+                program_name    : "post_folding_heuristics",
+                pipeline_id     : params.pipeline_id,
+                hardware_id     : filtool_prog.data_products[0].hardware_id,
+                output_archives : archives,
+                search_fold_merged : search_fold_merged_path,
+                pulsarx_batch_name : pulsarx_batch_name,
+                pngs : pngs,
+                output_dp : output_dp,
+                output_dp_id : output_dp_id,
+                target_name : target_name,
+                beam_id : beam_id,
+                utc_start : utc_start,
+                cfg_name : cfg_name,
+                filstr : filstr,
+                archive_source_dir : publish_dir
+            ]
             
-//         }
+        }
         
-//         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
-// }
+        post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
+}
 }
 
