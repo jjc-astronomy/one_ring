@@ -459,6 +459,7 @@ class DataProductOutputHandler:
         segment_start_sample = int(segment_params.find('segment_start_sample').text)
         segment_nsamples = int(segment_params.find('segment_nsamples').text)
         segment_pepoch = float(segment_params.find('segment_pepoch').text)
+        segment_fft_size = int(search_params.find('size').text)
 
         
         ignored_entries = ['candidate', 'opt_period', 'folded_snr', 'byte_offset', 'is_adjacent', 'is_physical']
@@ -472,10 +473,11 @@ class DataProductOutputHandler:
             cand_dict['segment_start_sample'] = segment_start_sample
             cand_dict['segment_nsamples'] = segment_nsamples
             cand_dict['segment_pepoch'] = segment_pepoch
+            cand_dict['segment_fft_size'] = segment_fft_size
             rows.append(cand_dict)
 
         df = pd.DataFrame(rows)
-        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float})
+        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float, "segment_fft_size": int})
         
         return df
 
@@ -503,6 +505,7 @@ class DataProductOutputHandler:
             message['segment_start_sample'] = int(row['segment_start_sample'])
             message['segment_nsamples'] = int(row['segment_nsamples'])
             message['segment_pepoch'] = str(row['segment_pepoch'])
+            message['segment_fft_size'] = int(row['segment_fft_size'])
 
             if candidate_filter_id:
                 message['candidate_filter_id'] = candidate_filter_id

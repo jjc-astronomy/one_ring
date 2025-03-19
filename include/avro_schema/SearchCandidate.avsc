@@ -116,6 +116,11 @@
       "name": "segment_pepoch",
       "type": ["null", "string"],
       "default": null
+    },
+    {
+      "name": "segment_fft_size",
+      "type": ["null", "long"],
+      "default": null
     }
     
   ]
