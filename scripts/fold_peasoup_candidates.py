@@ -250,7 +250,7 @@ def fold_with_pulsarx(
     nbins_high, nbins_low, subint_length, nsubband, utc_beam,
     beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
     rfi_filter, cmask=None, start_fraction=None, end_fraction=None,
-    extra_args=None, output_rootname=None
+    extra_args=None, output_rootname=None, coherent_dm=0.0
 ):
     """
     Fold candidates with pulsarx (psrfold_fil). 
@@ -295,9 +295,10 @@ def fold_with_pulsarx(
 
     # Build the base command
     script = (
-        "psrfold_fil2 -v --render -t {} --candfile {} -n {} {} {} --template {} "
+        "psrfold_fil2 -v --render --output_width --cdm {} -t {} --candfile {} -n {} {} {} --template {} "
         "--clfd {} -L {} -f {} {} -o {} --srcname {} --pepoch {} --frac {} {} {}"
     ).format(
+        coherent_dm,
         pulsarx_threads,
         pulsarx_predictor,
         nsubband,
@@ -409,6 +410,8 @@ def main():
                         help='Override end fraction [0..1]. If not provided, computed from XML data.')
     parser.add_argument('--extra_args', type=str, default=None,
                         help='Extra arguments to pass to prepfold or psrfold_fil.')
+    parser.add_argument('--cdm', type=float, default=0.0,
+                        help='Coherent DM to use for folding. Default is 0.0.')
 
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
@@ -544,7 +547,8 @@ def main():
             start_fraction=user_start_fraction,
             end_fraction=user_end_fraction,
             extra_args=args.extra_args,
-            output_rootname=args.output_rootname
+            output_rootname=args.output_rootname,
+            coherent_dm=args.cdm
         )
 
 if __name__ == "__main__":

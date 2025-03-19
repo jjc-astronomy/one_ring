@@ -1,1 +1,0 @@
-scripts/generate_uuid_search_candidate.py
