@@ -323,6 +323,7 @@ def fold_with_pulsarx(
 
     logging.debug(f"Running PulsarX command: {script}")
     
+    
     process = subprocess.Popen(
         shlex.split(script),
         stdout=subprocess.PIPE,
