@@ -9,6 +9,7 @@ IMAGES["vishnubk/pulsarx"]="dev1"
 IMAGES["vishnubk/pics"]="20230630_pics_model_update"
 IMAGES["vishnubk/mmgps_candidate_filter"]="20230821-rfi-filter-snr-thresh"
 IMAGES["vishnubk/candy_picker"]="latest"
+IMAGES["vishnubk/watchdog"]="latest"
 
 #apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
 # Output file

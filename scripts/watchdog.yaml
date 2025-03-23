@@ -1,8 +1,8 @@
-directory: "/bscratch/vishnu/NGC1851_PROCESSING/LIVE_PROGRESS/"  # Null implies use the script's directory with 'results/' appended
+directory: "/hercules/scratch/vishnu/COMPACT/PIPELINE_PROGRESS/LIVE_PROGRESS/"  # Null implies use the script's directory with 'results/' appended
 file_type_lookup_table: "../lookup_tables/file_type.csv"
 candidate_filter_lookup_table: "../lookup_tables/candidate_filter.csv"
-bootstrap_servers: "localhost:9092"
-schema_registry_url: "http://localhost:8081"
+bootstrap_servers: "localhost:49092"
+schema_registry_url: "http://localhost:48081"
 processing_topic: "processing"
 processing_schema_file: "../include/avro_schema/Processing.avsc"
 dp_input_topic: "processing_dp_inputs"
