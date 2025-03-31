@@ -482,7 +482,7 @@ class DataProductOutputHandler:
         return df
 
     
-    def xml_to_kafka_producer(self, xml_file, beam_id, hardware_id, dp_id, candidate_filter_id=None):
+    def xml_to_kafka_producer(self, xml_file, beam_id, hardware_id, dp_id, candidate_filter_id=None, created_by_run_name = None):
 
         df = self.get_xml_cands(xml_file)
     
@@ -510,6 +510,9 @@ class DataProductOutputHandler:
             if candidate_filter_id:
                 message['candidate_filter_id'] = candidate_filter_id
             
+            if created_by_run_name:
+                message['created_by_run_name'] = created_by_run_name
+            
             #Send to kafka
             self.kafka_producer_search_candidate.produce_message(self.search_cand_topic, message)
     
@@ -518,6 +521,9 @@ class DataProductOutputHandler:
         results = pd.read_csv(results_csv_file)
         if results.empty:
             logging.error(f"No output found in {results_csv_file}")
+        
+        has_boxcar = 'boxcar_width' in results.columns
+
 
         for index, row in results.iterrows():
             message = {}
@@ -534,10 +540,13 @@ class DataProductOutputHandler:
             message['fold_snr'] = row['S/N_new']
             message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
             message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
+
             if fold_batch_name:
                 message['batch_name'] = fold_batch_name
-
             
+            if has_boxcar:
+                message['boxcar_width_ms'] = str(row['boxcar_width'] * 1e3)
+
             #Send to kafka
             self.kafka_producer_fold_candidate.produce_message(self.fold_cand_topic, message)
 
@@ -712,10 +721,10 @@ class DataProductOutputHandler:
 
                 if taskname.startswith("candy_picker") and basename == 'output_rejected.xml':
                     candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == 'candy_picker', 'id'].values[0])
-                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, candidate_filter_id)
+                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, candidate_filter_id = candidate_filter_id, created_by_run_name = run_name)
 
                 if taskname.startswith("peasoup"):
-                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid)
+                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, created_by_run_name = run_name)
 
         
         #PulsarX folds
@@ -945,6 +954,6 @@ def main(config):
     observer.join()
 
 if __name__ == "__main__":
-    config = load_config('watchdog.yaml')
+    config = load_config(sys.argv[1])
     main(config)
 

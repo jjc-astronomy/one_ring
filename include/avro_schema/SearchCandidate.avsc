@@ -121,6 +121,11 @@
       "name": "segment_fft_size",
       "type": ["null", "long"],
       "default": null
+    },
+    {
+      "name": "created_by_run_name",
+      "type": ["null", "string"],
+      "default": null
     }
     
   ]

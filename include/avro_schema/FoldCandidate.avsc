@@ -58,6 +58,11 @@
       "default": null
     },
     {
+      "name": "boxcar_width_ms",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "fold_snr",
       "type": ["null", "float"],
       "default": null
