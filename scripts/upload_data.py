@@ -1420,7 +1420,7 @@ class DatabaseUploader:
         argument_hash = self._generate_argument_hash(params, filtool_keys)
         container_image_id = params['container_image_id']
         #Below are the keys that are not in the database, but are required for nextflow
-        keys_to_exclude = ['get_metadata', 'program_name', 'container_image_path']
+        keys_to_exclude = ['get_metadata', 'program_name', 'container_image_path', 'local_write']
 
         # Handle default values and None conversions
         defaults = {

@@ -78,6 +78,7 @@ echo "CSV File: $csv_file"
 echo "Metadata File: $metadata_file"
 echo "Pointing Index: $pointing_idx"
 
+module load apptainer
 singularity_image_path="/fred/oz002/vishnu/singularity_images"
 hardware_name="ngarrgu"
 apptainer_image="${singularity_image_path}/skyweaverpy_latest.sif"
