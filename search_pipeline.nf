@@ -181,6 +181,7 @@ workflow {
 
         candy_picker_output = candy_picker(candy_picker_input)
 
+
         candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch ->
             
             return [
@@ -265,6 +266,7 @@ workflow {
         ]
         }
 
+
         pulsarx_input = candy_picker_with_pepoch_key.combine(pulsarx_input, by:0).map { segment_pepoch, candy_picker_map, pulsarx_map ->
             return [
                 program_name     : pulsarx_prog.program_name[0],
@@ -328,7 +330,6 @@ workflow {
 
     }
 
-    //Fold with pulsarx
     pulsarx_output = pulsarx(pulsarx_input)
 
     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
@@ -355,8 +356,7 @@ workflow {
         }
        pics_output = pics(pics_input)
 
-
-    }
+     }
     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
         calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->

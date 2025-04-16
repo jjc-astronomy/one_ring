@@ -326,6 +326,7 @@ class DatabaseUploader:
             
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
+                dp_metadata['filepath'] = dp_metadata['filepath'].replace("/b/PROCESSING", "/fred/oz002/vvenkatr/COMPACT")
                 dp_id = self._insert_data_product(
                     beam_id,
                     file_type_id,
@@ -409,13 +410,13 @@ class DatabaseUploader:
             pulsarx_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pulsarx', 'pulsarx')
             
             #Calculate pepoch, start_fraction, end_fraction, and effective tobs
-            pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'])
+            pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'], filtool_arguments)
             
             
             #If subint is null, set it to effective tobs/64
             if pulsarx_params.get('subint_length') == "null":
                 pulsarx_params['subint_length'] = int(effective_tobs/64)
-                
+            
             pulsarx_params['pepoch'] = pepoch
             pulsarx_params['start_frac'] = start_fraction
             pulsarx_params['end_frac'] = end_fraction
@@ -542,7 +543,7 @@ class DatabaseUploader:
             return candidate_filter_ids
 
     
-    def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size):
+    def _calculate_pepoch_start_end_fractions(self, full_obs_metadata, start_sample, fft_size, filtool_arguments):
         """
         Calculate pepoch, start_fraction, and end_fraction from observation metadata.
         start_fraction = start_sample / nsamples
@@ -554,8 +555,9 @@ class DatabaseUploader:
         tstart_updated = tstart_mjd + start_time_days
         pepoch = tstart_updated + 0.5 * end_time_days
         """
-        nsamples = full_obs_metadata['nsamples']
-        tsamp = full_obs_metadata['tsamp']
+        nsamples = full_obs_metadata['nsamples']/int(filtool_arguments['time_decimation_factor'])
+        
+        tsamp = float(full_obs_metadata['tsamp']) * int(filtool_arguments['time_decimation_factor'])
         tstart_mjd = full_obs_metadata['tstart_mjd']
         
 

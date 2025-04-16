@@ -40,7 +40,7 @@ process filtool {
 
     tmp_output_dp="${output_dp}"
     filtool_output_string=\${tmp_output_dp%_01.fil}
-    filtool -t ${program_args.threads} --nbits ${program_args.nbits} --mean ${program_args.mean} --std ${program_args.std} --td ${program_args.time_decimation_factor} --fd ${program_args.freq_decimation_factor} --telescope ${program_args.telescope} -z ${program_args.rfi_filter} -o \$filtool_output_string -s ${target_name} -f ${input_dp} ${program_args.extra_args}
+    filtool -t ${program_args.threads} --nbits ${program_args.nbits} --mean ${program_args.mean} --std ${program_args.std} --td ${program_args.time_decimation_factor} --fd ${program_args.freq_decimation_factor} --telescope ${program_args.telescope} -z ${program_args.rfi_filter} -o \$filtool_output_string -s ${target_name} -f ${input_dp} ${program_args.extra_args} 
 
     # Get the metadata from the output file and store it in the environment variables
     while IFS='=' read -r key value
@@ -172,6 +172,7 @@ process candy_picker{
     """
     #!/bin/bash
     
+
     candy_picker_input_file_string=""
     for filename_prefix in ${filstr}; do
         #Define directory strucure
@@ -184,6 +185,7 @@ process candy_picker{
         # Append the filename to the input file string
         candy_picker_input_file_string="\${candy_picker_input_file_string} \${filename_prefix}/\${filename}"
     done
+
     # Run candy_picker
 
     candy_picker -p ${params.candidate_filter.candy_picker.period_tolerance} -d ${params.candidate_filter.candy_picker.dm_tolerance} -n ${task.cpus} \${candy_picker_input_file_string}
@@ -259,7 +261,7 @@ process pulsarx {
     publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
-    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} --extra_args "${program_args.extra_args}" 
+    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} --extra_args "${program_args.extra_args}" --cdm ${coherent_dm} 
     
     # Generate UUIDs for data_product DB Table
     fold_cands=\$(ls -v *.ar)
@@ -311,6 +313,8 @@ process pics{
     container "${params.apptainer_images.pics}"
     publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.csv", mode: 'copy'
     //errorStrategy 'ignore'
+    
+
     errorStrategy { 
         if (task.attempt <= 3) {
             sleep(task.attempt * 60000 as long) // Retry with increasing delay of 1 minute times the attempt number
