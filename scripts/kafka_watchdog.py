@@ -641,6 +641,7 @@ class DataProductOutputHandler:
         hardware_id: int,
         generate_file_hash=False,
         publish_dir=None,
+        remote_workdir=None,
         **optional_fields
     ):
         data_product_ids = output_dp_id_list.split()
@@ -654,14 +655,37 @@ class DataProductOutputHandler:
                 sys.exit(1)
             filepaths = publish_dirs * len(filenames) if len(publish_dirs) == 1 else publish_dirs
 
-            
-        for dp_id, filename, filepath in zip(data_product_ids, filenames, filepaths):
+        
+        # Default remote filepaths equal to local ones
+        remote_filepaths = [workdir] * len(filenames)
+        
+        # If remote_workdir is provided, modify filepaths to point to the remote workdir for specific tasks
+        if remote_workdir and taskname.startswith(("peasoup", "candy_picker", "pulsarx", "pics", "post_folding_heuristics")):
+            modified_paths = []
+            for path in remote_filepaths:
+                try:
+                    #Moving everything to lowercase in-case workdir and run name are not the same case
+                    lower_path = path.lower()
+                    lower_run_name = run_name.lower()
+                    idx = lower_path.index(lower_run_name)
+                    suffix = path[idx:]  # slice the original `path`, not the lowercased one
+                    new_path = os.path.join(remote_workdir, suffix)
+                    modified_paths.append(new_path)
+                except ValueError:
+                    logging.warning(f"run_name '{run_name}' not found in path '{path}'")
+                    #sys.exit(1)
+            remote_filepaths = modified_paths
+
+
+
+        for dp_id, filename, filepath, remote_filepath in zip(data_product_ids, filenames, filepaths, remote_filepaths):
             
             dp_uuid = UUIDUtility.convert_uuid_string_to_binary(dp_id)
             basename = os.path.basename(filename)
             file_extension = os.path.splitext(filename)[1].lstrip('.')
             file_type_id = int(self.file_type_lookup_table.loc[self.file_type_lookup_table['name'] == file_extension, 'id'].values[0])
-           
+            #This is the filename path for XML and CSVs if you are doing a remote watchdog (eg processing in ngarggu, but watchdog is from contra)
+            remote_filename = os.path.join(remote_filepath, basename)
 
             if generate_file_hash:
                 optional_fields['filehash'] = generate_file_hash(filename)
@@ -717,19 +741,24 @@ class DataProductOutputHandler:
             self.kafka_producer_dp_output.produce_message(self.dp_output_topic, message)
             #Send to search_candidate topic
             if file_extension == 'xml':
+                print(f"Processing XML file: {remote_filename}")
                 candidate_filter_id = None
+                #Check if remote_filename exists
+                if not os.path.isfile(remote_filename):
+                    logging.warning(f"File not found: {remote_filename}")
+                    #sys.exit(1)
 
                 if taskname.startswith("candy_picker") and basename == 'output_rejected.xml':
                     candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == 'candy_picker', 'id'].values[0])
-                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, candidate_filter_id = candidate_filter_id, created_by_run_name = run_name)
+                    self.xml_to_kafka_producer(remote_filename, beam_id, hardware_id, dp_uuid, candidate_filter_id = candidate_filter_id, created_by_run_name = run_name)
 
                 if taskname.startswith("peasoup"):
-                    self.xml_to_kafka_producer(filename, beam_id, hardware_id, dp_uuid, created_by_run_name = run_name)
+                    self.xml_to_kafka_producer(remote_filename, beam_id, hardware_id, dp_uuid, created_by_run_name = run_name)
 
         
         #PulsarX folds
         if taskname.startswith("pulsarx"):
-            search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
+            search_fold_merged_file = f"{remote_filepath}/{optional_fields.get('search_fold_merged')}"
             
             if not os.path.isfile(search_fold_merged_file):
                 logging.error(f"File not found: {search_fold_merged_file} ")
@@ -740,7 +769,7 @@ class DataProductOutputHandler:
             self.pulsarx_to_kafka_producer(search_fold_merged_file, fold_batch_name)
             
         if taskname.startswith("prepfold"):
-            search_fold_merged_file = f"{filepath}/{optional_fields.get('search_fold_merged')}"
+            search_fold_merged_file = f"{remote_filepath}/{optional_fields.get('search_fold_merged')}"
             if not os.path.isfile(search_fold_merged_file):
                 logging.error(f"File not found: {search_fold_merged_file} ")
                 sys.exit(1)
@@ -748,21 +777,21 @@ class DataProductOutputHandler:
         if taskname.startswith("pics"):
             if publish_dir:
                 # publish_dir inside nextflow points to the directory where we store shorted listed candidates for each model. 
-                filepath = filepath.rstrip("/").removesuffix("/PICS")
-            output_dp_file = f"{filepath}/{filename_list}"
+                remote_filepath = remote_filepath.rstrip("/").removesuffix("/PICS")
+            output_dp_file = f"{remote_filepath}/{filename_list}"
             if not os.path.isfile(output_dp_file):
                 logging.error(f"File not found: {output_dp_file} ")
                 sys.exit(1)
             self.pics_to_kafka_producer(output_dp_file)
         if taskname.startswith("post_folding_heuristics"):
-            output_dp_file = f"{filepath}/{filename_list}" 
+            output_dp_file = f"{remote_filepath}/{filename_list}" 
             if not os.path.isfile(output_dp_file):
                 logging.error(f"File not found: {output_dp_file} ")
                 sys.exit(1)
             self.post_folding_heuristics_to_kafka_producer(output_dp_file)
 
 class JsonFileProcessor(FileSystemEventHandler):
-    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, kafka_producer_search_candidate, kafka_producer_fold_candidate, kafka_producer_candidate_tracker, processing_topic, dp_input_topic, dp_output_topic, search_cand_topic, fold_cand_topic, candidate_tracker_topic, file_type_lookup_table, candidate_filter_lookup_table, read_existing=False):
+    def __init__(self, directory, kafka_producer_processing, kafka_producer_dp_input, kafka_producer_dp_output, kafka_producer_search_candidate, kafka_producer_fold_candidate, kafka_producer_candidate_tracker, processing_topic, dp_input_topic, dp_output_topic, search_cand_topic, fold_cand_topic, candidate_tracker_topic, file_type_lookup_table, candidate_filter_lookup_table, read_existing=False, remote_workdir=None):
         super().__init__()
         self.directory = directory
         self.kafka_producer_processing = kafka_producer_processing
@@ -780,6 +809,7 @@ class JsonFileProcessor(FileSystemEventHandler):
         self.file_type_lookup_table = file_type_lookup_table
         self.candidate_filter_lookup_table = candidate_filter_lookup_table
         self.read_existing = read_existing
+        self.remote_workdir = remote_workdir
         self.dp_inputs_handler = DataProductInputHandler(kafka_producer_dp_input, dp_input_topic)
         self.dp_outputs_handler = DataProductOutputHandler(kafka_producer_dp_output, dp_output_topic, kafka_producer_search_candidate, search_cand_topic, kafka_producer_fold_candidate, fold_cand_topic, kafka_producer_candidate_tracker, candidate_tracker_topic, file_type_lookup_table, candidate_filter_lookup_table)
 
@@ -851,7 +881,8 @@ class JsonFileProcessor(FileSystemEventHandler):
                     subband_dm = filtered_data_dp_outputs.get('subband_dm'),
                     search_fold_merged = filtered_data_dp_outputs.get('search_fold_merged'),
                     publish_dir = filtered_data_dp_outputs.get('publish_dir'),
-                    foldGroupName = filtered_data_dp_outputs.get('foldGroupName')
+                    foldGroupName = filtered_data_dp_outputs.get('foldGroupName'),
+                    remote_workdir = self.remote_workdir
 
                 )
 
@@ -876,6 +907,7 @@ def main(config):
         directory = os.path.join(script_dir, 'results/')
     else:
         directory = config['directory']
+    
 
     # Use config values as needed
     bootstrap_servers = config['bootstrap_servers']
@@ -893,6 +925,13 @@ def main(config):
     candidate_tracker_topic = config['candidate_tracker_topic']
     candidate_tracker_schema_file = config['candidate_tracker_schema_file']
     read_existing = config['read_existing']
+    checkpointing_enabled = config['checkpointing_enabled']
+    #If config['remote_workdir'] is empty or None, set to None
+    if config['remote_workdir'] == '':
+        remote_workdir = None
+    else:
+        remote_workdir = config['remote_workdir']
+    
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -926,22 +965,50 @@ def main(config):
         candidate_tracker_topic=candidate_tracker_topic,
         file_type_lookup_table=file_type_lookup_table,
         candidate_filter_lookup_table=candidate_filter_lookup_table,
-        read_existing=read_existing
+        read_existing=read_existing,
+        remote_workdir=remote_workdir
     )
 
     
 
 
-
     if read_existing:
-        for filename in sorted(os.listdir(directory)):
-            if filename.endswith('.json'):
-                logging.info(f"Processing existing file: {filename}")
-                file_path = os.path.join(directory, filename)
-                event_handler.process_json(file_path)
-                sleep(2)
+        checkpoint_path = config.get("checkpoint_file")
+        checkpoint_json = None
 
-    #observer = Observer()
+    if checkpointing_enabled and os.path.isfile(checkpoint_path):
+        with open(checkpoint_path, 'r') as f:
+            checkpoint_json = f.read().strip()
+        logging.info(f"Checkpointing enabled. Last processed file: {checkpoint_json}")
+    elif checkpointing_enabled:
+        logging.info("Checkpointing enabled but checkpoint file does not exist. Starting from the beginning.")
+
+    json_files = sorted([f for f in os.listdir(directory) if f.endswith('.json')])
+
+    # If checkpointing is enabled and a checkpoint file was read
+    if checkpointing_enabled and checkpoint_json:
+        try:
+            last_index = json_files.index(checkpoint_json)
+            json_files = json_files[last_index + 1:]
+            logging.info(f"Skipping {last_index + 1} files already processed up to: {checkpoint_json}")
+        except ValueError:
+            logging.error(f"Checkpoint file '{checkpoint_json}' not found in directory listing. Exiting.")
+            sys.exit(1)
+
+    for filename in json_files:
+        logging.info(f"Processing existing file: {filename}")
+        file_path = os.path.join(directory, filename)
+        try:
+            event_handler.process_json(file_path)
+            sleep(2)
+            # Update checkpoint after successful processing
+            if checkpointing_enabled:
+                with open(checkpoint_path, 'w') as f:
+                    f.write(filename)
+        except Exception as e:
+            logging.error(f"Error processing {filename}: {e}")
+            sys.exit(1)
+    # Start monitoring the directory for new files
     observer = PollingObserver()
     observer.schedule(event_handler, directory, recursive=False)
     observer.start()
