@@ -259,9 +259,10 @@ workflow {
         }
     
         //Map candy_picker_unwrapped with segment_pepoch as key and prepare input for pulsarx
-        candy_picker_with_pepoch_key = candy_picker_unwrapped.map { record ->
+        
+         candy_picker_with_pepoch_key = candy_picker_unwrapped.map { record ->
         [
-            record.segment_pepoch.toString(),  // key
+            new BigDecimal(record.segment_pepoch).stripTrailingZeros().toPlainString(), // key
             record                             // the record as the value
         ]
         }

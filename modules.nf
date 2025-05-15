@@ -24,13 +24,29 @@ process filtool {
 
     output:
     tuple path(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(beam_id), val(coherent_dm), env(tsamp), env(tobs), env(nsamples), env(freq_start_mhz), env(freq_end_mhz), env(tstart), env(tstart_utc), env(nchans), env(nbits), val(filstr)
-    publishDir "${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/", mode: 'symlink'
 
+    // Only publish if local_write=1
+    publishDir "${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/", 
+           mode: 'copy', enabled: params.filtool.local_write == 1 ? true : false
 
     script:
+
     """
     #!/bin/bash
+    set -euo pipefail
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
+
     workdir=\$(pwd)
+    echo "Working directory: \${workdir}"
     publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
     mkdir -p \${publish_dir}
 
@@ -41,20 +57,24 @@ process filtool {
     tmp_output_dp="${output_dp}"
     filtool_output_string=\${tmp_output_dp%_01.fil}
     filtool -t ${program_args.threads} --nbits ${program_args.nbits} --mean ${program_args.mean} --std ${program_args.std} --td ${program_args.time_decimation_factor} --fd ${program_args.freq_decimation_factor} --telescope ${program_args.telescope} -z ${program_args.rfi_filter} -o \$filtool_output_string -s ${target_name} -f ${input_dp} ${program_args.extra_args} 
-
+    #Check if filtool command succeeded
+    check_status
     # Get the metadata from the output file and store it in the environment variables
     while IFS='=' read -r key value
         do
             declare "\$key=\$value"
         done < <(python ${program_args.get_metadata} -f ${output_dp})
-
+    
+    # Check if the metadata extraction succeeded
+    check_status
     # Generate a UUID for the output file
     output_dp_id=\$(uuidgen)
-
+    check_status
     if [ ${params.filtool.local_write} -eq 0 ]; then
         # Create symlink to the output file
         cd \${workdir}
         ln -s \${publish_dir}/${output_dp} ${output_dp}
+        check_status
     fi
     """
 }
@@ -62,7 +82,6 @@ process filtool {
 process peasoup {
     label 'peasoup'
     container params.apptainer_images.peasoup
-    errorStrategy 'ignore'
 
     input:
     tuple val(program_name),
@@ -88,12 +107,23 @@ process peasoup {
     script:
     """
     #!/bin/bash
+    set -euo pipefail
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
     publish_dir="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.cfg_name}/"
 
 
     # Write out dm_file.txt
     python -c "import numpy as np; dm_trials = np.arange(${program_args.dm_start}, ${program_args.dm_end}, ${program_args.dm_step}); f=open('dm_file.txt','w'); f.writelines(f'{dm}\\n' for dm in dm_trials); f.close()"
-
+    check_status
     # Accumulate optional arguments
     optional_args=""
 
@@ -134,11 +164,17 @@ process peasoup {
     \${optional_args} \
     --dm_file dm_file.txt \
     -o \${output_dir}/
+
+    # Check if peasoup command succeeded
+    check_status
     # Generate a UUID for the output file
     output_dp_id=\$(uuidgen)
+    check_status
   
     # Generate a UUID for each search candidate to insert into the database. Dump this to a new XML file.
     python ${params.kafka.save_search_candidate_uuid} -i ${peasoup_orig_xml}
+    #Check if python command succeeded
+    check_status
     segment_pepoch=\$(grep "segment_pepoch" ${output_dp} | awk -F'[<>]' '/segment_pepoch/ {printf "%.6f", \$3}')
     #Passing this as an environment variable for posterity in logs.
     cfg_name=${program_args.cfg_name}
@@ -171,6 +207,17 @@ process candy_picker{
     script:
     """
     #!/bin/bash
+    set -euo pipefail
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
     
 
     candy_picker_input_file_string=""
@@ -189,7 +236,9 @@ process candy_picker{
     # Run candy_picker
 
     candy_picker -p ${params.candidate_filter.candy_picker.period_tolerance} -d ${params.candidate_filter.candy_picker.dm_tolerance} -n ${task.cpus} \${candy_picker_input_file_string}
-
+    
+    # Check if candy_picker command succeeded
+    check_status
     output_dp=\$(ls -v **/output_*.xml | xargs realpath | tr '\n' ' ')
     output_dp_id=""
     for file in \$output_dp; do
@@ -221,6 +270,8 @@ process candy_picker{
         dest="\${publish_dirs[\$i]}"
         echo "Copying \${src} to \${dest}"
         cp \${src} \${dest}
+        # Check if the copy command succeeded
+        check_status
     done
     
 
@@ -231,7 +282,8 @@ process candy_picker{
 process pulsarx {
     label 'pulsarx'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
+    //publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{png,cands,csv}", mode: 'copy'
 
     input:
     tuple val(program_name),
@@ -258,11 +310,26 @@ process pulsarx {
     script:
     """
     #!/bin/bash
+    set -euo pipefail
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
+
     publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
     python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} --extra_args "${program_args.extra_args}" --cdm ${coherent_dm} 
     
+    # Check if pulsarx command succeeded
+    check_status
+
     # Generate UUIDs for data_product DB Table
     fold_cands=\$(ls -v *.ar)
 
@@ -272,6 +339,8 @@ process pulsarx {
         if [ ! -f "\$png_file" ]; then
             echo "Missing PNG file for \$png_file. Running dmffdot."
             dmffdot --telescope MeerKAT -f \$file
+            # Check if dmffdot command succeeded
+            check_status
         fi
     done
     
@@ -292,6 +361,8 @@ process pulsarx {
 
     filtered_df_for_folding=\$(ls -v filtered_df_for_folding.csv)
     python ${params.kafka.merged_fold_search} -p ${program_name} -f \${fold_cands} -x \${filtered_df_for_folding} -d \${fold_dp_id} -u \${fold_candidate_id} -c \${pulsarx_cands_file}
+    # Check if python command succeeded
+    check_status
     search_fold_merged=search_fold_merged.csv
     data_dir=\$(pwd)
 
@@ -347,10 +418,23 @@ process pics{
     script:
     """
     #!/bin/bash
+    set -euo pipefail
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
     echo "Running PICS"
     publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/PICS/"
     mkdir -p \${publish_dir}
     python ${params.candidate_filter.ml_candidate_scoring.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_candidate_scoring.models_dir} -f ${search_fold_merged} -g --create_shortlist_csv -s ${archive_source_dir} -p \${publish_dir}
+    # Check if python command succeeded
+    check_status
     output_dp="search_fold_pics_merged.csv"
     output_dp_id=\$(uuidgen)
 
@@ -397,10 +481,24 @@ process post_folding_heuristics{
     script:
     """
     #!/bin/bash
+    set -euo pipefail
+
+
+    # Reusable function to check status of last command
+    check_status() {
+        local exit_code=\$?
+        if [ \$exit_code -ne 0 ]; then
+            >&2 echo "ERROR: Last command failed with exit code \$exit_code"
+            exit 1
+        fi
+        return 0
+    }
     publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     mkdir -p \${publish_dir}
 
     python ${params.candidate_filter.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.candidate_filter.calculate_post_folding_heuristics.alpha_snr_threshold} --create_shortlist_csv -g -s ${archive_source_dir} -p \${publish_dir}
+    # Check if python command succeeded
+    check_status
     output_dp="search_postfold_heuristics_merged.csv"
     output_dp_id=\$(uuidgen)
     """
