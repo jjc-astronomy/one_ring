@@ -657,12 +657,13 @@ class DataProductOutputHandler:
 
         
         # Default remote filepaths equal to local ones
-        remote_filepaths = [workdir] * len(filenames)
+        remote_filepaths = filepaths
         
         # If remote_workdir is provided, modify filepaths to point to the remote workdir for specific tasks
-        if remote_workdir and taskname.startswith(("peasoup", "candy_picker", "pulsarx", "pics", "post_folding_heuristics")):
+        if remote_workdir and taskname.startswith(("peasoup", "candy_picker", "pics", "post_folding_heuristics")):
+            remote_workdir_filepaths = [workdir] * len(filenames)
             modified_paths = []
-            for path in remote_filepaths:
+            for path in remote_workdir_filepaths:
                 try:
                     #Moving everything to lowercase in-case workdir and run name are not the same case
                     lower_path = path.lower()
@@ -672,8 +673,8 @@ class DataProductOutputHandler:
                     new_path = os.path.join(remote_workdir, suffix)
                     modified_paths.append(new_path)
                 except ValueError:
-                    logging.warning(f"run_name '{run_name}' not found in path '{path}'")
-                    #sys.exit(1)
+                    logging.error(f"run_name '{run_name}' not found in path '{path}'")
+                    sys.exit(1)
             remote_filepaths = modified_paths
 
 
@@ -745,8 +746,8 @@ class DataProductOutputHandler:
                 candidate_filter_id = None
                 #Check if remote_filename exists
                 if not os.path.isfile(remote_filename):
-                    logging.warning(f"File not found: {remote_filename}")
-                    #sys.exit(1)
+                    logging.error(f"File not found: {remote_filename}")
+                    sys.exit(1)
 
                 if taskname.startswith("candy_picker") and basename == 'output_rejected.xml':
                     candidate_filter_id = int(self.candidate_filter_lookup_table.loc[self.candidate_filter_lookup_table['name'] == 'candy_picker', 'id'].values[0])
@@ -1000,7 +1001,7 @@ def main(config):
         file_path = os.path.join(directory, filename)
         try:
             event_handler.process_json(file_path)
-            sleep(2)
+            sleep(1)
             # Update checkpoint after successful processing
             if checkpointing_enabled:
                 with open(checkpoint_path, 'w') as f:
@@ -1008,7 +1009,20 @@ def main(config):
         except Exception as e:
             logging.error(f"Error processing {filename}: {e}")
             sys.exit(1)
-    # Start monitoring the directory for new files
+
+        
+
+        
+
+    # if read_existing:
+    #     for filename in sorted(os.listdir(directory)):
+    #         if filename.endswith('.json'):
+    #             logging.info(f"Processing existing file: {filename}")
+    #             file_path = os.path.join(directory, filename)
+    #             event_handler.process_json(file_path)
+    #             sleep(2)
+
+    #observer = Observer()
     observer = PollingObserver()
     observer.schedule(event_handler, directory, recursive=False)
     observer.start()
