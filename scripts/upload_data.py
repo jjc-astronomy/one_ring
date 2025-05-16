@@ -25,8 +25,8 @@ import csv
 from pathlib import Path
 
 
-#load_dotenv(dotenv_path=Path('.compactdb.env'))
-load_dotenv(dotenv_path=Path('.testdb.env'))
+load_dotenv(dotenv_path=Path('.compactdb.env'))
+#load_dotenv(dotenv_path=Path('.testdb.env'))
 
 
 class WorkflowJSONBuilder:
@@ -715,7 +715,7 @@ class DatabaseUploader:
         # Decode ml_models JSON
         all_ml_models_records = []
         model_dir = nextflow_cfg['candidate_filter.ml_candidate_scoring.models_dir']
-        ml_models = glob.glob(f"{model_dir}/*.pkl")
+        ml_models = glob.glob(f"include/ml_models/*.pkl")
 
         if len(ml_models) == 0:
             raise ValueError("No ML models found in the directory")
