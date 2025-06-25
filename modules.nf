@@ -45,6 +45,12 @@ process filtool {
         return 0
     }
 
+    if [[ ! -f "${program_args.get_metadata}" ]]; then
+    echo "Error: File '${program_args.get_metadata}' does not exist." >&2
+    exit 1
+    fi
+
+
     workdir=\$(pwd)
     echo "Working directory: \${workdir}"
     publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
