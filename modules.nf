@@ -342,6 +342,8 @@ process pulsarx {
     tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr)
 
     script:
+    def custom_nbin_arg = program_args.custom_nbin_plan != "null" ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
+    def extra_args = program_args.extra_args != "null" ? "--extra_args=\"${program_args.extra_args}\"" : ""
     """
     #!/bin/bash
     set -euo pipefail
@@ -359,12 +361,9 @@ process pulsarx {
     publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
-    # Accumulate optional arguments
-    optional_args=""
-    if [ "${program_args.custom_nbin_plan}" != "null" ]; then
-        optional_args="\${optional_args} --custom_nbin_plan=\"${program_args.custom_nbin_plan}\""
-    fi
-    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} \${optional_args} --extra_args "${program_args.extra_args}" 
+    echo "Running PulsarX folding with the following command:"
+    echo '''python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg}'''
+    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg}
 
     # Check if pulsarx command succeeded
     check_status

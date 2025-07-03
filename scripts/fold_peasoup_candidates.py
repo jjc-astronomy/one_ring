@@ -16,15 +16,17 @@ import json
 ###############################################################################
 
 def setup_logging(verbose=False):
-    """
-    Set up logging configuration. DEBUG level if verbose, else INFO.
-    """
     log_level = logging.DEBUG if verbose else logging.INFO
+    handler = logging.StreamHandler(sys.stdout)  # Explicit STDOUT handler
+    handler.setLevel(log_level)
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[handler]  # Override default STDERR behavior
     )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stderr))
+
 
 ###############################################################################
 # Output Streaming with 10s Buffer
@@ -321,6 +323,7 @@ def fold_with_pulsarx(
         pulsarx_predictor = generate_pulsarX_cand_file_accel_search(cand_freq, cand_dms, cand_accs, cand_snrs)
     
     if custom_nbin_plan is not None:
+        #custom_nbin_plan = " ".join(custom_nbin_plan)
         # Use the custom nbin plan provided by the user
         nbins_string = custom_nbin_plan.strip()
         #Check if it starts with '-b' or not
@@ -473,8 +476,8 @@ def main():
                         help='Extra arguments to pass to prepfold or psrfold_fil.')
     parser.add_argument('--cdm', type=float, default=None,
                         help='Coherent DM to use for folding. Default is whatever is in the XML file.')
-    parser.add_argument('--custom_nbin_plan', type=str, default=None,
-                    help='Custom nbin plan to use for folding. If not provided, default bin plan is used.')
+    parser.add_argument('--custom_nbin_plan',  default=None,
+                        help="Custom nbin plan to use for folding. If not provided, default bin plan is used.")
     parser.add_argument('--pulsarx_folding_algorithm', type=str, default="render",
                     help='Folding algorithm to use for PulsarX. If not provided, default is "render".')
 

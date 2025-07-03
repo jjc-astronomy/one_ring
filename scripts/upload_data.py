@@ -388,7 +388,6 @@ class DatabaseUploader:
         
         
         peasoup_params = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df)
-        print(f"peasoup_params: {peasoup_params}")
         # Add each peasoup record as a separate program entry in JSON
         # peasoup_records is a list of dicts, each representing a peasoup configuration with arguments and peasoup_id
         for peasoup_record in peasoup_params:
@@ -406,7 +405,6 @@ class DatabaseUploader:
             PulsarX arguments depends on peasoup arguments (start_sample, fft_size, nsamples, pepoch). So we generate it in the loop.
             They are are matched in the nextflow pipeline based on pepoch.
             '''
-            print(f"peasoup_record: {peasoup_record}")
             
             pulsarx_params = self._prepare_program_parameters(nextflow_cfg, docker_hash_df, 'pulsarx', 'pulsarx')
             
