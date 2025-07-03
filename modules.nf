@@ -45,11 +45,11 @@ process filtool {
         return 0
     }
 
+    # Check if the metadata extractor file exists
     if [[ ! -f "${program_args.get_metadata}" ]]; then
     echo "Error: File '${program_args.get_metadata}' does not exist." >&2
     exit 1
     fi
-
 
     workdir=\$(pwd)
     echo "Working directory: \${workdir}"
@@ -132,7 +132,51 @@ process peasoup {
     check_status
     # Accumulate optional arguments
     optional_args=""
-
+    if [ "${program_args.acc_start}" != "null" ]; then
+        optional_args="\${optional_args} --acc_start ${program_args.acc_start}"
+    fi
+    if [ "${program_args.acc_end}" != "null" ]; then
+        optional_args="\${optional_args} --acc_end ${program_args.acc_end}"
+    fi
+    if [ "${program_args.acc_pulse_width}" != "null" ]; then
+        optional_args="\${optional_args} --acc_pulse_width ${program_args.acc_pulse_width}"
+    fi
+    if [ "${program_args.accel_tol}" != "null" ]; then
+        optional_args="\${optional_args} --acc_tol ${program_args.accel_tol}"
+    fi
+    if [ "${program_args.dm_pulse_width}" != "null" ]; then
+        optional_args="\${optional_args} --dm_pulse_width ${program_args.dm_pulse_width}"
+    fi
+    if [ "${program_args.min_snr}" != "null" ]; then
+        optional_args="\${optional_args} -m ${program_args.min_snr}"
+    fi
+    if [ "${program_args.ram_limit_gb}" != "null" ]; then
+        optional_args="\${optional_args} --ram_limit_gb ${program_args.ram_limit_gb}"
+    fi
+    if [ "${program_args.nharmonics}" != "null" ]; then
+        optional_args="\${optional_args} --nharmonics ${program_args.nharmonics}"
+    fi
+    if [ "${program_args.ngpus}" != "null" ]; then
+        optional_args="\${optional_args} -t ${program_args.ngpus}"
+    fi
+    if [ "${program_args.total_cands_limit}" != "null" ]; then
+        optional_args="\${optional_args} --limit ${program_args.total_cands_limit}"
+    fi
+    if [ "${program_args.fft_size}" != "null" ]; then
+        optional_args="\${optional_args} --fft_size ${program_args.fft_size}"
+    fi
+    if [ "${program_args.start_sample}" != "null" ]; then
+        optional_args="\${optional_args} --start_sample ${program_args.start_sample}"
+    fi
+    if [ "${program_args.min_freq}" != "null" ]; then
+        optional_args="\${optional_args} --min_freq ${program_args.min_freq}"
+    fi
+    if [ "${program_args.max_freq}" != "null" ]; then
+        optional_args="\${optional_args} --max_freq ${program_args.max_freq}"
+    fi
+    if [ "${program_args.keplerian_template_bank}" != "null" ]; then
+        optional_args="\${optional_args} --keplerian_template_bank_file ${program_args.keplerian_template_bank}"
+    fi
     if [ "${program_args.birdie_list}" != "null" ]; then
         optional_args="\${optional_args} -z ${program_args.birdie_list}"
     fi
@@ -151,25 +195,9 @@ process peasoup {
     output_dir="peasoup_results"
     mkdir -p \${output_dir}
     # Run peasoup
-    peasoup -i ${input_dp} \
-    --acc_start ${program_args.acc_start} \
-    --acc_end ${program_args.acc_end} \
-    --acc_pulse_width ${program_args.acc_pulse_width} \
-    --acc_tol ${program_args.accel_tol} \
-    --dm_pulse_width ${program_args.dm_pulse_width} \
-    -m ${program_args.min_snr} \
-    --ram_limit_gb ${program_args.ram_limit_gb} \
-    --nharmonics ${program_args.nharmonics} \
-    -t ${program_args.ngpus} \
-    --limit ${program_args.total_cands_limit} \
-    --fft_size ${program_args.fft_size} \
-    --start_sample ${program_args.start_sample} \
-    --cdm ${coherent_dm} \
-    --min_freq ${program_args.min_freq} \
-    --max_freq ${program_args.max_freq} \
-    \${optional_args} \
-    --dm_file dm_file.txt \
-    -o \${output_dir}/
+    echo "Running peasoup with the following command:"
+    echo "peasoup -p -i ${input_dp} --cdm ${coherent_dm} \${optional_args} --dm_file dm_file.txt -o \${output_dir}/"
+    peasoup -p -i ${input_dp} --cdm ${coherent_dm} \${optional_args} --dm_file dm_file.txt -o \${output_dir}/
 
     # Check if peasoup command succeeded
     check_status
@@ -331,8 +359,13 @@ process pulsarx {
     publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
-    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} --extra_args "${program_args.extra_args}" --cdm ${coherent_dm} 
-    
+    # Accumulate optional arguments
+    optional_args=""
+    if [ "${program_args.custom_nbin_plan}" != "null" ]; then
+        optional_args="\${optional_args} --custom_nbin_plan=\"${program_args.custom_nbin_plan}\""
+    fi
+    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} \${optional_args} --extra_args "${program_args.extra_args}" 
+
     # Check if pulsarx command succeeded
     check_status
 

@@ -477,8 +477,8 @@ class DataProductOutputHandler:
             rows.append(cand_dict)
 
         df = pd.DataFrame(rows)
-        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float, "segment_fft_size": int})
-        
+        df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "jerk": float, "pb": float, "a1": float, "phi": float, "t0": float, "omega": float, "ecc": float, "nassoc": int, "ddm_count_ratio": float, "ddm_snr_ratio": float,  "cand_id_in_file": int, "segment_start_sample": int, "segment_nsamples": int, "segment_pepoch": float, "segment_fft_size": int})
+
         return df
 
     
@@ -493,12 +493,16 @@ class DataProductOutputHandler:
             message['dm'] = row['dm']
             message['pdot'] = str(a_to_pdot(row['period'], row['acc']))
             message['acc'] = str(row['acc'])
+            message['pb'] = str(row['pb'])
+            message['a1'] = str(row['a1'])
+            message['phi'] = str(row['phi'])
+            message['t0'] = str(row['t0'])
+            message['omega'] = str(row['omega'])
+            message['ecc'] = str(row['ecc'])
             message['snr'] = row['snr']
             message['ddm_count_ratio'] = row['ddm_count_ratio']
             message['ddm_snr_ratio'] = row['ddm_snr_ratio']
             message['nassoc'] = int(row['nassoc'])
-            message['filename'] = os.path.basename(xml_file)
-            message['filepath'] = os.path.dirname(xml_file)
             message['nh'] = int(row['nh'])
             message['dp_id'] = dp_id
             message['candidate_id_in_file'] = int(row['cand_id_in_file'])
@@ -537,6 +541,12 @@ class DataProductOutputHandler:
             message['pdot_error'] = str(pdot_error)
             message['acc'] = str(row['acc_new'])
             message['acc_error'] = str(row['acc_err'])
+            message['pb'] = str(row['pb'])
+            message['a1'] = str(row['a1'])
+            message['phi'] = str(row['phi'])
+            message['t0'] = str(row['t0'])
+            message['omega'] = str(row['omega'])
+            message['ecc'] = str(row['ecc'])
             message['fold_snr'] = row['S/N_new']
             message['search_candidate_id'] = UUIDUtility.convert_uuid_string_to_binary(row['search_candidates_database_uuid'])
             message['dp_id'] = UUIDUtility.convert_uuid_string_to_binary(row['fold_dp_output_uuid'])
@@ -546,6 +556,7 @@ class DataProductOutputHandler:
             
             if has_boxcar:
                 message['boxcar_width_ms'] = str(row['boxcar_width'] * 1e3)
+                message['duty_cycle'] = float(row['boxcar_width'])/p
 
             #Send to kafka
             self.kafka_producer_fold_candidate.produce_message(self.fold_cand_topic, message)

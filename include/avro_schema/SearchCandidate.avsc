@@ -33,28 +33,38 @@
       "default": null
     },
     {
-      "name": "pb",
-      "type": ["null", "float"],
+      "name": "jerk",
+      "type": ["null", "string"],
       "default": null
     },
     {
-      "name": "x",
-      "type": ["null", "float"],
+      "name": "pb",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "a1",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "phi",
+      "type": ["null", "string"],
       "default": null
     },
     {
       "name": "t0",
-      "type": ["null", "float"],
+      "type": ["null", "string"],
       "default": null
     },
     {
       "name": "omega",
-      "type": ["null", "float"],
+      "type": ["null", "string"],
       "default": null
     },
     {
-      "name": "e",
-      "type": ["null", "float"],
+      "name": "ecc",
+      "type": ["null", "string"],
       "default": null
     },
     {
@@ -85,11 +95,6 @@
     {
       "name": "candidate_filter_id",
       "type": ["null", "int"],
-      "default": null
-    },
-    {
-      "name": "metadata_hash",
-      "type": ["null", "string"],
       "default": null
     },
     {

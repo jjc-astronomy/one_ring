@@ -3,9 +3,9 @@
 # Define images and their versions
 declare -A IMAGES
 IMAGES["vishnubk/compact_sql"]="latest"
-IMAGES["vishnubk/peasoup"]="latest"
+IMAGES["vishnubk/peasoup"]="keplerian"
 IMAGES["vishnubk/pulsar-miner"]="turing-sm75"
-IMAGES["vishnubk/pulsarx"]="dev1"
+IMAGES["vishnubk/pulsarx"]="latest"
 IMAGES["vishnubk/pics"]="20230630_pics_model_update"
 IMAGES["vishnubk/mmgps_candidate_filter"]="20230821-rfi-filter-snr-thresh"
 IMAGES["vishnubk/candy_picker"]="latest"

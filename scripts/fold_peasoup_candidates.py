@@ -73,6 +73,7 @@ def immediate_stream_output(pipe, logger, log_level=logging.INFO):
 # Pre-Select Candidates based on JSON Configuration
 ###############################################################################
 
+
 def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFrame:
     """
     Filter candidates from the dataframe based on the folding configuration
@@ -81,75 +82,98 @@ def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFr
     The configuration file is expected to have the following structure:
     {
         "first_run": [
+            filter block 1
             {
-                "spin_period": {"min": X, "max": Y},
+                "period": {"min": X, "max": Y},
                 "dm": {"min": X, "max": Y},
-                "fft_snr": {"min": X, "max": Y},
+                "snr": {"min": X, "max": Y},
                 "nh": {"min": X, "max": Y},
                 "acc": {"min": X, "max": Y},
+                "jerk": {"min": X, "max": Y},
+                "pb": {"min": X, "max": Y},
+                "a1": {"min": X, "max": Y},
+                "phi": {"min": X, "max": Y},
+                "omega": {"min": X, "max": Y},
+                "ecc": {"min": X, "max": Y},
                 "total_cands_limit": N
             },
+            filter block 2
+            {
+                "period": {"min": X, "max": Y},
+                "total_cands_limit": N
+                ...
+            }
             ...
         ]
     }
 
-    For each filter, rows in `df` are selected if:
-      - period is between spin_period.min and spin_period.max,
-      - dm is between dm.min and dm.max,
-      - snr is between fft_snr.min and fft_snr.max,
-      - nh is between nh.min and nh.max,
-      - acc is between acc.min and acc.max.
-
-    Only up to total_cands_limit rows are selected per filter.
-    The filtered candidates from all filters are then concatenated and duplicates dropped.
+    Notes:
+    - For each filter block, only rows satisfying *all* parameter constraints are selected.
+    - Each parameter filter must have a 'min' and 'max' key.
+    - Any number of parameters can be specified in a single block, and any number of independent blocks can be defined.
+    - After filtering, up to 'total_cands_limit' candidates are kept per filter block.
+    - Multiple blocks: intersection within each block, union across blocks. Drops duplicates using 'cand_id_in_file'.
 
     Args:
         df: DataFrame containing candidate data.
         config_file: Path to JSON configuration file.
-    
+
     Returns:
-        A DataFrame with pre-selected candidates.
+        A DataFrame with pre-selected candidates for folding.
     """
     with open(config_file, 'r') as f:
         config = json.load(f)
-    
-    # Assuming one group key; e.g., "first_run"
+
     group_key = list(config.keys())[0]
     filters = config[group_key]
 
-    
+
     filtered_dfs = []
-    for filter_def in filters:
-        # Apply filter conditions
-        sel = df.loc[
-            (df['period'].between(filter_def['spin_period']['min'], filter_def['spin_period']['max'])) &
-            (df['dm'].between(filter_def['dm']['min'], filter_def['dm']['max'])) &
-            (df['snr'].between(filter_def['fft_snr']['min'], filter_def['fft_snr']['max'])) &
-            (df['nh'].between(filter_def['nh']['min'], filter_def['nh']['max'])) &
-            (df['acc'].between(filter_def['acc']['min'], filter_def['acc']['max']))
-        ]
-        logging.info(f"Filter {filter_def} selected {len(sel)} candidates.")
-        # Limit to the desired number of candidates
+    
+    #Iterate through each filter block
+    for idx, filter_def in enumerate(filters):
+        # Start with a mask that selects all rows. Everything is True initially.
+        mask = pd.Series(True, index=df.index)
+  
+        # Iterate through each parameter within a block
+        for param, bounds in filter_def.items():
+            if param == 'total_cands_limit':
+                continue
+            if param not in df.columns:
+                raise KeyError(f"Parameter '{param}' not found in DataFrame columns.")
+            if 'min' not in bounds or 'max' not in bounds:
+                raise ValueError(f"Parameter '{param}' must have both 'min' and 'max'.")
+            # Update the mask to select rows where the parameter is within the specified bounds
+            mask &= df[param].between(bounds['min'], bounds['max'])
+            #When you repeat mask &= <condition> you are effectively keeping only the rows that satisfy this condition and also the previous conditions
+
+        sel = df.loc[mask]
+
+        logging.info(f"Filter block {idx+1} {filter_def} selected {len(sel)} candidates.")
+
         limit = filter_def.get('total_cands_limit', None)
         if limit is not None and len(sel) > limit:
-            logging.info(f"Filter {filter_def} returned more candidates than the limit {limit}. Truncating to {limit} for folding.")
+            logging.info(
+                f"Filter block {idx+1} returned {len(sel)} candidates, "
+                f"exceeding limit {limit}. Truncating."
+            )
             sel = sel.head(limit)
-        
-        
+
         filtered_dfs.append(sel)
-    
+
     if filtered_dfs:
-        # Concatenate and drop duplicate candidates (assuming cand_id_in_file is unique)
-        df_filtered = pd.concat(filtered_dfs)
-        logging.info(f"Total candidates after Concatenation: {len(df_filtered)}")
+        df_filtered = pd.concat(filtered_dfs, ignore_index=True)
+        logging.info(f"Total candidates after concatenation: {len(df_filtered)}")
+
         df_filtered = df_filtered.drop_duplicates(subset='cand_id_in_file')
-        df_filtered = df_filtered.sort_values(by='cand_id_in_file')
         logging.info(f"Total candidates after dropping duplicates: {len(df_filtered)}")
+
+        df_filtered = df_filtered.sort_values(by='cand_id_in_file').reset_index(drop=True)
+
         return df_filtered
     else:
+        logging.info("No candidates matched any filter block. Returning original DataFrame.")
         return df
-
-
 
 
 
@@ -157,13 +181,22 @@ def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFr
 # PulsarX Candidate File
 ###############################################################################
 
-def generate_pulsarX_cand_file(cand_mod_frequencies, cand_dms, cand_accs, cand_snrs):
+def generate_pulsarX_cand_file_accel_search(cand_freqs, cand_dms, cand_accs, cand_snrs):
     cand_file_path = 'pulsarx.candfile'
     with open(cand_file_path, 'w') as f:
         f.write("#id DM accel F0 F1 F2 S/N\n")
-        for i in range(len(cand_mod_frequencies)):
-            f.write("%d %f %f %f 0 0 %f\n" % (i, cand_dms[i], cand_accs[i], cand_mod_frequencies[i], cand_snrs[i]))
+        for i in range(len(cand_freqs)):
+            f.write(f"{i} {cand_dms[i]} {cand_accs[i]} {cand_freqs[i]} 0 0 {cand_snrs[i]}\n")
+    logging.info(f"Generated Accel Search PulsarX candidate file: {cand_file_path}")
+    return cand_file_path
 
+def generate_pulsarX_cand_file_keplerian_search(cand_freqs, cand_dms, cand_pb, cand_a1, cand_t0, cand_omega, cand_ecc, cand_snrs):
+    cand_file_path = 'pulsarx.candfile'
+    with open(cand_file_path, 'w') as f:
+        f.write("#id DM accel F0 F1 F2 PB A1 T0 OM ECC S/N\n")
+        for i in range(len(cand_freqs)):
+            f.write(f"{i} {cand_dms[i]} 0 {cand_freqs[i]} 0 0 {cand_pb[i]} {cand_a1[i]} {cand_t0[i]} {cand_omega[i]} {cand_ecc[i]} {cand_snrs[i]}\n")
+    logging.info(f"Generated Keplerian PulsarX candidate file: {cand_file_path}")
     return cand_file_path
 
 ###############################################################################
@@ -250,22 +283,51 @@ def fold_with_pulsarx(
     nbins_high, nbins_low, subint_length, nsubband, utc_beam,
     beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
     rfi_filter, cmask=None, start_fraction=None, end_fraction=None,
-    extra_args=None, output_rootname=None, coherent_dm=0.0
+    extra_args=None, output_rootname=None, coherent_dm=0.0,
+    custom_nbin_plan=None, pulsarx_folding_algorithm="render"
 ):
     """
     Fold candidates with pulsarx (psrfold_fil). 
     'pepoch', 'start_fraction', and 'end_fraction' are either user-provided or derived.
     """
 
+    additional_flags = ""
+    pulsarx_folding_algorithm = pulsarx_folding_algorithm.strip().lower()
+    if pulsarx_folding_algorithm not in ["render", "dspsr", "presto"]:
+        logging.error(f"Invalid PulsarX folding algorithm: {pulsarx_folding_algorithm}. "
+                      "Valid options are 'render', 'dspsr', or 'presto'.")
+        sys.exit(1)
+    additional_flags += f"--{pulsarx_folding_algorithm} "
+
     cand_dms = df['dm'].values
     cand_accs = df['acc'].values
     cand_period = df['period'].values
     cand_freq = 1 / cand_period
     cand_snrs = df['snr'].values
+    cand_pb = df['pb'].values
+    cand_a1 = df['a1'].values
+    cand_t0 = df['t0'].values
+    cand_omega = df['omega'].values
+    cand_ecc = df['ecc'].values
 
-    pulsarx_predictor = generate_pulsarX_cand_file(cand_freq, cand_dms, cand_accs, cand_snrs)
-
-    nbins_string = "-b {} --nbinplan 0.01 {}".format(nbins_low, nbins_high)
+    if cand_pb[0] > 0.0:
+        logging.info("Detected Keplerian candidates, generating PulsarX candidate file for Keplerian search.")
+        pulsarx_predictor = generate_pulsarX_cand_file_keplerian_search(cand_freq,
+            cand_dms, cand_pb, cand_a1, cand_t0,
+            cand_omega, cand_ecc, cand_snrs)
+        
+    else:
+        logging.info("Detected Acceleration search candidates, generating PulsarX candidate file for Acceleration search.")
+        pulsarx_predictor = generate_pulsarX_cand_file_accel_search(cand_freq, cand_dms, cand_accs, cand_snrs)
+    
+    if custom_nbin_plan is not None:
+        # Use the custom nbin plan provided by the user
+        nbins_string = custom_nbin_plan.strip()
+        #Check if it starts with '-b' or not
+        if not nbins_string.startswith('-b'):
+            logging.error("Custom nbin plan must start with '-b'. Please provide a valid nbin plan.")
+    else:
+        nbins_string = "-b {} --nbinplan 0.01 {}".format(nbins_low, nbins_high)
     
     if output_rootname is None:
         output_rootname = utc_beam
@@ -289,13 +351,11 @@ def fold_with_pulsarx(
                 raise Exception(f"Unable to parse channel mask: {error}")
 
     if rfi_filter:
-        additional_flags = f"--rfi {rfi_filter}"
-    else:
-        additional_flags = ""
-
+        additional_flags += f"--rfi {rfi_filter} "
+    
     # Build the base command
     script = (
-        "psrfold_fil2 -v --render --output_width --cdm {} -t {} --candfile {} -n {} {} {} --template {} "
+        "psrfold_fil2 -v --output_width --cdm {} -t {} --candfile {} -n {} {} {} --template {} "
         "--clfd {} -L {} -f {} {} -o {} --srcname {} --pepoch {} --frac {} {} {}"
     ).format(
         coherent_dm,
@@ -322,8 +382,8 @@ def fold_with_pulsarx(
         script += f" {extra_args}"
 
     logging.debug(f"Running PulsarX command: {script}")
-    
-    
+
+    # Run the command
     process = subprocess.Popen(
         shlex.split(script),
         stdout=subprocess.PIPE,
@@ -411,8 +471,12 @@ def main():
                         help='Override end fraction [0..1]. If not provided, computed from XML data.')
     parser.add_argument('--extra_args', type=str, default=None,
                         help='Extra arguments to pass to prepfold or psrfold_fil.')
-    parser.add_argument('--cdm', type=float, default=0.0,
-                        help='Coherent DM to use for folding. Default is 0.0.')
+    parser.add_argument('--cdm', type=float, default=None,
+                        help='Coherent DM to use for folding. Default is whatever is in the XML file.')
+    parser.add_argument('--custom_nbin_plan', type=str, default=None,
+                    help='Custom nbin plan to use for folding. If not provided, default bin plan is used.')
+    parser.add_argument('--pulsarx_folding_algorithm', type=str, default="render",
+                    help='Folding algorithm to use for PulsarX. If not provided, default is "render".')
 
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
@@ -420,7 +484,8 @@ def main():
     if not args.input_file:
         logging.error("You need to provide an XML file to read.")
         sys.exit(1)
-
+    
+    os.chdir(args.output_path)
     xml_file = args.input_file
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -437,6 +502,10 @@ def main():
     fft_size = int(search_params.find("size").text)
     total_nsamples = int(root.find("header_parameters/nsamples").text)
     source_name_prefix = str(header_params.find("source_name").text).strip()
+    # Allow only safe characters: letters, numbers, underscores, hyphens
+    # If any other character is present, replace with 'random'
+    if not re.match(r'^[\w\-]+$', source_name_prefix):
+        source_name_prefix = "random"
 
     segment_start_sample = int(segment_params.find('segment_start_sample').text)
     segment_nsamples = int(segment_params.find('segment_nsamples').text)
@@ -488,14 +557,15 @@ def main():
     
     publish_filterbank_file = os.path.join(filterbank_publish_dir, os.path.basename(filterbank_file))
     df['filterbank_file'] = publish_filterbank_file
-    df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "nassoc": int, "cand_id_in_file": int})
+    df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "jerk": float, "pb": float, "a1": float, "phi": float, "t0": float, "omega": float, "ecc": float, "nassoc": int, "cand_id_in_file": int})
 
     # If a config file is provided, filter the dataframe accordingly
     if args.config_file:
         logging.info(f"XML file contains {len(df)} candidates before filtering.")
         logging.info(f"Applying folding configuration from {args.config_file}")
         df = apply_folding_configuration(df, args.config_file)
-        logging.info(f"After filtering, {len(df)} candidates remain for folding.")
+        logging.info(f"After applying folding configuration, {len(df)} candidates remain for folding.")
+       
     else:
         logging.info(f"No configuration file provided, folding all {len(df)} candidates.")
     
@@ -506,6 +576,12 @@ def main():
 
     
     PulsarX_Template = args.pulsarx_fold_template
+    if args.cdm is not None:
+        coherent_dm = args.cdm
+        logging.info(f"Using user-provided coherent DM = {coherent_dm}")
+    else:
+        coherent_dm = float(search_params.find('cdm').text)
+        logging.info(f"Using coherent DM from XML = {coherent_dm}")
 
     if args.fold_technique == 'presto':
         logging.info("Folding with Presto...")
@@ -549,7 +625,9 @@ def main():
             end_fraction=user_end_fraction,
             extra_args=args.extra_args,
             output_rootname=args.output_rootname,
-            coherent_dm=args.cdm
+            coherent_dm=coherent_dm,
+            custom_nbin_plan=args.custom_nbin_plan,
+            pulsarx_folding_algorithm=args.pulsarx_folding_algorithm
         )
 
 if __name__ == "__main__":

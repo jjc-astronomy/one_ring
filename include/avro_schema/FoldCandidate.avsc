@@ -58,8 +58,53 @@
       "default": null
     },
     {
+      "name": "jerk",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "jerk_error",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "pb",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "a1",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "phi",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "t0",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "omega",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "ecc",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
       "name": "boxcar_width_ms",
       "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "duty_cycle",
+      "type": ["null", "float"],
       "default": null
     },
     {
@@ -68,23 +113,8 @@
       "default": null
     },
     {
-      "name": "filename",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "filepath",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
       "name": "search_candidate_id",
       "type": ["null", "bytes"],
-      "default": null
-    },
-    {
-      "name": "metadata_hash",
-      "type": ["null", "string"],
       "default": null
     },
     {
@@ -95,16 +125,6 @@
     {
       "name": "candidate_filter_id",
       "type": ["null", "int"],
-      "default": null
-    },
-    {
-      "name": "subband_dm",
-      "type": ["null", "string"],
-      "default": null
-    },
-    {
-      "name": "segment_pepoch",
-      "type": ["null", "string"],
       "default": null
     },
     {
