@@ -21,3 +21,5 @@ HR_STREAM_ID_1-5.csv
 template_bank_upgrade_plan.txt
 nf_config_for_data_upload.cfg
 semi_coherent_searches.py
+scratch/
+

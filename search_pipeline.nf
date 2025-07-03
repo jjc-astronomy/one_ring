@@ -5,6 +5,9 @@ include { filtool; peasoup; candy_picker; pulsarx; pics; post_folding_heuristics
 
 
 workflow {
+    def scratchDir = file("scratch")
+    scratchDir.mkdirs()  
+
     // Extract 'filtool' object from pipeline config JSON
     def filtool_prog = params.programs.find { it.program_name == 'filtool' }
 
@@ -113,7 +116,7 @@ workflow {
     //Dump the fold configuration to a JSON file.
 
     def fold_config = JsonOutput.prettyPrint(JsonOutput.toJson(params.folding.configuration))
-    def pulsarx_fold_config = file("pulsarx_fold_config.json")
+    def pulsarx_fold_config = file("scratch/pulsarx_fold_config.json")
     pulsarx_fold_config.text = fold_config
 
     def foldGroupName = params.folding.configuration.keySet().iterator().next()
