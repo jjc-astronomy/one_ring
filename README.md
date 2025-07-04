@@ -76,7 +76,7 @@ Scratch directories, intermediate config files, and logs are managed automatical
 
 ---
 
-## Repository Layout (Recommended)
+## Repository Layout 
 
 ```plaintext
 .
