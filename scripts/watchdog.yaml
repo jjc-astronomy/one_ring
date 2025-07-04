@@ -1,4 +1,4 @@
-directory: "/bscratch/vishnu/COMPACT/TB_TEST_RUN/JSON_EVENTS//"  # Null implies use the script's directory with 'results/' appended
+directory: "/bscratch/vishnu/COMPACT/TB_TEST_RUN/JSON_EVENTS/"  # Null implies use the script's directory with 'results/' appended
 remote_workdir: "" #This  is the directory located in the remote server (contra) where the work directories with XML and CSVs from another processing HPC (eg Ngarru) are stored
 file_type_lookup_table: "../lookup_tables/file_type.csv"
 candidate_filter_lookup_table: "../lookup_tables/candidate_filter.csv"

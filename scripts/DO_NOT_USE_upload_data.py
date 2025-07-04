@@ -21,7 +21,8 @@ from pathlib import Path
 
 #from natsort import natsorted
 # Load environment variables from .env file
-load_dotenv(dotenv_path=Path('.compactdb.env'))
+#load_dotenv(dotenv_path=Path('.compactdb.env'))
+load_dotenv(dotenv_path=Path('.testdb.env'))
 
 # Postgres username, password, and database name
 DB_SERVER = os.getenv("DB_HOST")  # Insert your DB address if it's not on Panoply
@@ -1871,6 +1872,8 @@ def insert_data_products(data_products, beam_id, file_type_id, hardware_id):
 
     
 def clear_all_columns():
+    delete_all_rows("candidate_tracker")
+    reset_primary_key_counter("candidate_tracker")
     delete_all_rows("candidate_filter")
     reset_primary_key_counter("candidate_filter")
     delete_all_rows("fold_candidate")
@@ -1899,6 +1902,8 @@ def clear_all_columns():
     reset_primary_key_counter("filtool")
     delete_all_rows("pulsarx")
     reset_primary_key_counter("pulsarx")
+    delete_all_rows("keplerian_template_bank")
+    reset_primary_key_counter("keplerian_template_bank")
     delete_all_rows("prepfold")
     reset_primary_key_counter("prepfold")
     delete_all_rows("beam_config")

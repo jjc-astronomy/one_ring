@@ -426,6 +426,9 @@ class DatabaseUploader:
             
             if pulsarx_params.get('custom_nbin_plan') == "null":
                 pulsarx_params['custom_nbin_plan'] = None
+            
+            if pulsarx_params.get('extra_args') == "null":
+                pulsarx_params['extra_args'] = None
 
             pulsarx_params['pepoch'] = pepoch
             pulsarx_params['start_frac'] = start_fraction

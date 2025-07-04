@@ -342,8 +342,8 @@ process pulsarx {
     tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr)
 
     script:
-    def custom_nbin_arg = program_args.custom_nbin_plan != "null" ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
-    def extra_args = program_args.extra_args != "null" ? "--extra_args=\"${program_args.extra_args}\"" : ""
+    def custom_nbin_arg = program_args.custom_nbin_plan != null ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
+    def extra_args = program_args.extra_args != null ? "--extra_args=\"${program_args.extra_args}\"" : ""
     """
     #!/bin/bash
     set -euo pipefail
