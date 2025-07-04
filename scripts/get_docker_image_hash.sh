@@ -1,4 +1,15 @@
 #!/bin/bash
+set -euo pipefail
+
+# === Resolve SCRIPT_DIR ===
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(realpath "$SCRIPT_DIR/..")"
+SCRATCH_DIR="$REPO_ROOT/scratch"
+
+# Make sure scratch exists
+mkdir -p "$SCRATCH_DIR"
+
+OUTPUT_FILE="$SCRATCH_DIR/docker_image_digests.csv"
 
 # Define images and their versions
 declare -A IMAGES
@@ -12,8 +23,6 @@ IMAGES["vishnubk/candy_picker"]="latest"
 IMAGES["vishnubk/watchdog"]="latest"
 
 #apptainer pull docker://vishnubk/peasoup:latest -> .sif (hash from dockerhub -> docker image)
-# Output file
-OUTPUT_FILE="docker_image_digests.csv"
 
 #Remove OUTPUT_FILE if it exists
 rm -rf $OUTPUT_FILE

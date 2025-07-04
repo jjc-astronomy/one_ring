@@ -84,6 +84,8 @@ class WorkflowJSONBuilder:
         }
         data.update(self.global_fields)
         
+        real_path = os.path.realpath(filename)
+        print(f"Params-file is written to {real_path}") 
 
         with open(filename, 'w') as f:
             json.dump(data, f, indent=indent)
