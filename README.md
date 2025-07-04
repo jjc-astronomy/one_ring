@@ -6,7 +6,7 @@
 
 ## Key Features
 
-* Fully distributed, cluster-agnostic pulsar search.
+* Fully distributed, HPC cluster-agnostic pulsar search.
 * Currently supports Acceleration searches, Template-Bank Searches for Circular or Elliptical orbits.
 * Supports live tracking of pipeline status with [`nf-live-tracking`](https://github.com/vishnubk/nf-live-tracking).
 * Modular design — configurable per cluster using separate `config/*` profiles.
