@@ -25,7 +25,7 @@ def setup_logging(verbose=False):
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[handler]  # Override default STDERR behavior
     )
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stderr))
+    #logging.getLogger().addHandler(logging.StreamHandler(sys.stderr))
 
 
 ###############################################################################
@@ -75,8 +75,14 @@ def immediate_stream_output(pipe, logger, log_level=logging.INFO):
 # Pre-Select Candidates based on JSON Configuration
 ###############################################################################
 
+import pandas as pd
+import json
+import logging
 
-def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFrame:
+def apply_folding_configuration(
+    df: pd.DataFrame,
+    config_file: str = None,
+    avoid_folding_file: str = None) -> pd.DataFrame:
     """
     Filter candidates from the dataframe based on the folding configuration
     specified in the JSON config file.
@@ -91,7 +97,6 @@ def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFr
                 "snr": {"min": X, "max": Y},
                 "nh": {"min": X, "max": Y},
                 "acc": {"min": X, "max": Y},
-                "jerk": {"min": X, "max": Y},
                 "pb": {"min": X, "max": Y},
                 "a1": {"min": X, "max": Y},
                 "phi": {"min": X, "max": Y},
@@ -116,66 +121,100 @@ def apply_folding_configuration(df: pd.DataFrame, config_file: str) -> pd.DataFr
     - After filtering, up to 'total_cands_limit' candidates are kept per filter block.
     - Multiple blocks: intersection within each block, union across blocks. Drops duplicates using 'cand_id_in_file'.
 
+    If 'avoid_folding_file' is provided, candidates with periods in that file will be excluded from folding.
+    This is useful to avoid folding bright known pulsars/rfi sources.
+
     Args:
         df: DataFrame containing candidate data.
-        config_file: Path to JSON configuration file.
+        config_file: Path to JSON configuration file (optional).
+        avoid_folding_file: Path to CSV file with periods to avoid (optional).
 
     Returns:
         A DataFrame with pre-selected candidates for folding.
     """
-    with open(config_file, 'r') as f:
-        config = json.load(f)
 
-    group_key = list(config.keys())[0]
-    filters = config[group_key]
+    df_filtered = df.copy()
+
+    # === 1. Exclude known avoid periods, if provided ===
+    if avoid_folding_file is not None:
+        avoid_df = pd.read_csv(avoid_folding_file)
+        # Convert period_ms to seconds and tolerance too
+        avoid_df['period_sec'] = avoid_df['period_ms'] / 1000.0
+        avoid_df['period_tol_sec'] = avoid_df['period_tolerance_ms'] / 1000.0
+
+        initial_count = len(df_filtered)
+        avoid_mask = pd.Series(False, index=df_filtered.index)
 
 
-    filtered_dfs = []
+        for _, row in avoid_df.iterrows():
+            p_min = row['period_sec'] - row['period_tol_sec']
+            p_max = row['period_sec'] + row['period_tol_sec']
+            dm_min = row['dm'] - row['dm_tolerance']
+            dm_max = row['dm'] + row['dm_tolerance']
+            logging.info(f"Avoid window: {p_min:.8f} - {p_max:.8f} s | DM window: {dm_min:.4f} - {dm_max:.4f}")
+
+
+            condition = df_filtered['period'].between(p_min, p_max) & df_filtered['dm'].between(dm_min, dm_max)
+            avoid_mask |= condition
+
+        avoided = df_filtered.loc[avoid_mask].copy()
+        avoided.to_csv("avoided_candidates_to_fold.csv", index=False)
+        logging.info("Saved avoided candidates to 'avoided_candidates_to_fold.csv'.")
+        # Keep only candidates that do not match the avoid periods
+        df_filtered = df_filtered.loc[~avoid_mask].reset_index(drop=True)
     
-    #Iterate through each filter block
-    for idx, filter_def in enumerate(filters):
-        # Start with a mask that selects all rows. Everything is True initially.
-        mask = pd.Series(True, index=df.index)
-  
-        # Iterate through each parameter within a block
-        for param, bounds in filter_def.items():
-            if param == 'total_cands_limit':
-                continue
-            if param not in df.columns:
-                raise KeyError(f"Parameter '{param}' not found in DataFrame columns.")
-            if 'min' not in bounds or 'max' not in bounds:
-                raise ValueError(f"Parameter '{param}' must have both 'min' and 'max'.")
-            # Update the mask to select rows where the parameter is within the specified bounds
-            mask &= df[param].between(bounds['min'], bounds['max'])
-            #When you repeat mask &= <condition> you are effectively keeping only the rows that satisfy this condition and also the previous conditions
+        logging.info(f"Total candidates after avoiding: {len(df_filtered)} (removed {initial_count - len(df_filtered)})")
 
-        sel = df.loc[mask]
+    # === 2. Apply config filters, if provided ===
+    if config_file is not None:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
 
-        logging.info(f"Filter block {idx+1} {filter_def} selected {len(sel)} candidates.")
+        group_key = list(config.keys())[0]
+        filters = config[group_key]
 
-        limit = filter_def.get('total_cands_limit', None)
-        if limit is not None and len(sel) > limit:
-            logging.info(
-                f"Filter block {idx+1} returned {len(sel)} candidates, "
-                f"exceeding limit {limit}. Truncating."
-            )
-            sel = sel.head(limit)
+        filtered_blocks = []
 
-        filtered_dfs.append(sel)
+        for idx, filter_def in enumerate(filters):
+            mask = pd.Series(True, index=df_filtered.index)
 
-    if filtered_dfs:
-        df_filtered = pd.concat(filtered_dfs, ignore_index=True)
-        logging.info(f"Total candidates after concatenation: {len(df_filtered)}")
+            for param, bounds in filter_def.items():
+                if param == 'total_cands_limit':
+                    continue
+                if param not in df_filtered.columns:
+                    raise KeyError(f"Parameter '{param}' not found in DataFrame columns.")
+                if 'min' not in bounds or 'max' not in bounds:
+                    raise ValueError(f"Parameter '{param}' must have both 'min' and 'max'.")
 
-        df_filtered = df_filtered.drop_duplicates(subset='cand_id_in_file')
-        logging.info(f"Total candidates after dropping duplicates: {len(df_filtered)}")
+                mask &= df_filtered[param].between(bounds['min'], bounds['max'])
+                # When you repeat mask &= <condition> you are effectively keeping only the rows that satisfy this condition and also the previous conditions
 
-        df_filtered = df_filtered.sort_values(by='cand_id_in_file').reset_index(drop=True)
+            sel = df_filtered.loc[mask]
 
-        return df_filtered
-    else:
-        logging.info("No candidates matched any filter block. Returning original DataFrame.")
-        return df
+            logging.info(f"Filter block {idx+1} {filter_def} selected {len(sel)} candidates.")
+
+            limit = filter_def.get('total_cands_limit', None)
+            if limit is not None and len(sel) > limit:
+                logging.info(
+                    f"Filter block {idx+1} returned {len(sel)} candidates, "
+                    f"exceeding limit {limit}. Truncating."
+                )
+                sel = sel.head(limit)
+
+            filtered_blocks.append(sel)
+
+        if filtered_blocks:
+            df_filtered = pd.concat(filtered_blocks, ignore_index=True)
+            logging.info(f"Total candidates after concatenation: {len(df_filtered)}")
+
+            df_filtered = df_filtered.drop_duplicates(subset='cand_id_in_file')
+            logging.info(f"Total candidates after dropping duplicates: {len(df_filtered)}")
+
+            df_filtered = df_filtered.sort_values(by='cand_id_in_file').reset_index(drop=True)
+        else:
+            logging.info("No candidates matched any filter block. Returning original DataFrame.")
+
+    return df_filtered
 
 
 
@@ -480,6 +519,7 @@ def main():
                         help="Custom nbin plan to use for folding. If not provided, default bin plan is used.")
     parser.add_argument('--pulsarx_folding_algorithm', type=str, default="render",
                     help='Folding algorithm to use for PulsarX. If not provided, default is "render".')
+    parser.add_argument('--avoid_folding_file', type=str, help="Path to CSV file with periods to avoid.", default=None)
 
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
@@ -563,15 +603,20 @@ def main():
     df = df.astype({"snr": float, "dm": float, "period": float, "nh": int, "acc": float, "jerk": float, "pb": float, "a1": float, "phi": float, "t0": float, "omega": float, "ecc": float, "nassoc": int, "cand_id_in_file": int})
 
     # If a config file is provided, filter the dataframe accordingly
-    if args.config_file:
+    if args.config_file or args.avoid_folding_file:
         logging.info(f"XML file contains {len(df)} candidates before filtering.")
-        logging.info(f"Applying folding configuration from {args.config_file}")
-        df = apply_folding_configuration(df, args.config_file)
-        logging.info(f"After applying folding configuration, {len(df)} candidates remain for folding.")
+
+        if args.avoid_folding_file:
+            logging.info(f"Applying avoid spin period ranges from {args.avoid_folding_file}")
+        
+        if args.config_file:
+            logging.info(f"Applying folding configuration from {args.config_file}")
+
+        df = apply_folding_configuration(df, config_file=args.config_file, avoid_folding_file=args.avoid_folding_file)
+        logging.info(f"After filtering, {len(df)} candidates remain for folding.")
        
     else:
         logging.info(f"No configuration file provided, folding all {len(df)} candidates.")
-    
     
     #Dump the candidates selected for folding to a CSV
     logging.info(f"Dumping the selected candidates to filtered_df_for_folding.csv")

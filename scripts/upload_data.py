@@ -418,8 +418,6 @@ class DatabaseUploader:
             else:
                 pepoch, start_fraction, end_fraction, effective_tobs = self._calculate_pepoch_start_end_fractions(full_obs_metadata, peasoup_record['start_sample'], peasoup_record['fft_size'], filtool_arguments)
 
-            print(f"filename: {row['filenames']}, pepoch: {pepoch}, start_fraction: {start_fraction}, end_fraction: {end_fraction}, effective_tobs: {effective_tobs}")
-
             # If subint is null, set it to effective tobs/64
             if pulsarx_params.get('subint_length') == "null":
                 pulsarx_params['subint_length'] = int(effective_tobs/64)
@@ -1650,15 +1648,28 @@ class DatabaseUploader:
     def _insert_pulsarx(self, params, return_id=False):
         pulsarx_table = self._get_table("pulsarx")
         #Define keys for argument_hash if needed
-        keys_for_hash = ['pepoch','nsubband','subint_length','start_frac','end_frac','clfd_q_value','nbins_high','nbins_low','rfi_filter','threads','extra_args','folding_algorithm','custom_nbin_plan']
+        keys_for_hash = ['pepoch','nsubband','subint_length','start_frac','end_frac','clfd_q_value','nbins_high','nbins_low','rfi_filter','threads','extra_args','folding_algorithm','custom_nbin_plan', 'avoid_folding_file']
         argument_hash = self._generate_argument_hash(params, keys_for_hash)
         params['argument_hash'] = argument_hash
+        #Calculate filehash of avoid_folding_file if it exists
+        if 'avoid_folding_file' in params and params['avoid_folding_file'] and str(params['avoid_folding_file']).strip().lower() != 'null':
+            avoid_folding_file = params['avoid_folding_file']
+            if os.path.exists(avoid_folding_file):
+                filehash = self._generate_file_content_hash(avoid_folding_file)
+                params['avoid_folding_filehash'] = filehash
+                self.logger.debug(f"Generated file hash for avoid folding file: {filehash}")
+            else:
+                raise FileNotFoundError(f"Avoid folding file {avoid_folding_file} does not exist.")
+        else:
+            params['avoid_folding_file'] = None
+
         keys_to_exclude = ['program_name','container_image_path']
 
         with self.engine.connect() as conn:
             stmt = (
                 select(pulsarx_table)
                 .where(pulsarx_table.c.argument_hash == argument_hash)
+                .where(pulsarx_table.c.avoid_folding_filehash == params.get('avoid_folding_filehash', None))
                 .limit(1)
             )
             result = conn.execute(stmt).first()

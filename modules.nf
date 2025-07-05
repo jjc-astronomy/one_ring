@@ -344,6 +344,8 @@ process pulsarx {
     script:
     def custom_nbin_arg = program_args.custom_nbin_plan != null ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
     def extra_args = program_args.extra_args != null ? "--extra_args=\"${program_args.extra_args}\"" : ""
+    def avoid_folding_file = program_args.avoid_folding_file != null ? "--avoid_folding_file=\"${program_args.avoid_folding_file}\"" : ""
+
     """
     #!/bin/bash
     set -euo pipefail
@@ -362,8 +364,8 @@ process pulsarx {
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
     echo "Running PulsarX folding with the following command:"
-    echo '''python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg}'''
-    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg}
+    echo '''python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg} ${avoid_folding_file}'''
+    python ${params.folding.script} -i ${input_dp} -t pulsarx -l ${program_args.nbins_low} -u ${program_args.nbins_high} -b ${beam_name} -utc ${utc_start} -threads ${program_args.threads} -p ${program_args.template_path}/${program_args.template_file} -r ${filstr} -v --config_file ${config_file} -f \${filterbank_publish_dir} ${extra_args} ${custom_nbin_arg} ${avoid_folding_file}
 
     # Check if pulsarx command succeeded
     check_status
