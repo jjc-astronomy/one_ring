@@ -72,12 +72,8 @@ def immediate_stream_output(pipe, logger, log_level=logging.INFO):
         pipe.close()
 
 ###############################################################################
-# Pre-Select Candidates based on JSON Configuration
+# Avoid candidates based on avoid candidate file & Pre-Select Candidates based on JSON Configuration
 ###############################################################################
-
-import pandas as pd
-import json
-import logging
 
 def apply_folding_configuration(
     df: pd.DataFrame,
