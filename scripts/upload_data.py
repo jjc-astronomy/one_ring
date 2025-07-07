@@ -588,11 +588,11 @@ class DatabaseUploader:
         tstart_updated = tstart_mjd + start_time_days
         #pepoch for template bank search is tstart and middle for accel.search.
         if template_bank_search:
-            pepoch = round(tstart_updated, 6)
+            pepoch = f"{tstart_updated:.6f}"
         else:
-            pepoch = round(tstart_updated + 0.5 * end_time_days, 6)
+            pepoch = f"{tstart_updated + 0.5 * end_time_days:.6f}"
         effective_tobs = (end_fraction - start_fraction) * full_obs_metadata['tobs']
-       
+
 
         return pepoch, start_fraction, end_fraction, effective_tobs
 
