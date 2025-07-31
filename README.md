@@ -1,113 +1,153 @@
 # One Ring: Distributed Binary Pulsar Search Pipeline
 
-**One Ring** is a high-performance Nextflow pipeline for large-scale binary pulsar searches. It is designed to run distributed across multiple HPC clusters, stream real-time status and candidate updates to a central MySQL/MariaDB database via Apache Kafka, and integrate seamlessly with modern containerized workflows.
+**One Ring** is a high-performance, fault-tolerant Nextflow pipeline for large-scale binary pulsar searches. It can run across multiple heterogeneous HPC clusters or cloud environments (e.g. AWS) and streams real-time search metadata and candidate detections into a central relational database using [Apache Kafka](https://kafka.apache.org/).
+
+All software components run inside containerized environments managed by [Apptainer (Singularity)](https://apptainer.org/), ensuring reproducibility and consistent deployment across diverse compute systems. Every command, its arguments, and the Apptainer image hash are automatically recorded in the database, enabling full reproducibility of each candidate and search result.
+
+
+> Pulsar searching is an **embarrassingly parallel** problem. Each observation can be processed independently, making it ideal for distributed compute environments. One Ring is designed to take advantage of this by scaling across any number of clusters, while keeping the search state synchronized through a central database and message broker.
+
+---
+
+## Table of Contents
+
+* [Key Features](#key-features)
+* [Architecture Overview](#architecture-overview)
+* [Requirements](#requirements)
+* [Usage](#usage)
+* [Repository Layout](#repository-layout)
+* [Notes](#notes)
+* [To Do](#to-do)
+* [Contact](#contact)
+* [Setup Instructions](SETUP.md)
 
 ---
 
 ## Key Features
 
-* Fully distributed, HPC cluster-agnostic pulsar search.
-* Currently supports Acceleration searches, Template-Bank Searches for Circular or Elliptical orbits.
-* Supports live tracking of pipeline status with [`nf-live-tracking`](https://github.com/vishnubk/nf-live-tracking).
-* Modular design — configurable per cluster using separate `config/*` profiles.
-* Uses containerized software environments via Apptainer (Singularity).
+* Distributed, cluster-independent pulsar search using [Nextflow](https://www.nextflow.io/).
+* Currently supports Acceleration (Johnston & Kulkanari 1991) and three and five Keplerian parameter template bank searches (Knispel et al. 2011, Balakrishnan et al. 2022) for circular and elliptical orbits.
+* Real-time monitoring and candidate updates using [Apache Kafka](https://kafka.apache.org/).
+* Structured SQL-based  of all metadata: pointings, beams, candidates, folding, and logs.
+* Fault-tolerant architecture: processing continues if Kafka or DB is temporarily down.
+* Fully containerized execution: no local Python or search tools required.
+* Modular configuration per cluster using `configs/`.
+* Safe resume support using `--resume`.
+
+---
+
+## Architecture Overview
+
+Each HPC cluster runs a local instance of the Nextflow pipeline. The pipeline consumes a list of filterbank files and processes them using containerized pulsar search tools. JSON logs describing task status, candidate detections, and folding metadata are written to disk via the [`nf-live-tracking`](https://github.com/vishnubk/nf-live-tracking) plugin in real-time.
+
+A containerized **watchdog script** monitors these logs and sends updates as Kafka events to a central broker. This component is fully isolated inside an Apptainer container—no local Python installation is required.
+
+On the control node, **Kafka Connect** runs a JDBC sink connector that consumes these events and writes them into a structured **MariaDB** or **MySQL** database. All data transfers can be tunneled via SSH.
+
+The pipeline is resilient: if Kafka or the database is temporarily unavailable, local JSON logs persist until connectivity is restored and the backlog is flushed.
 
 ---
 
 ## Requirements
 
-* **Nextflow** ≥ [latest stable](https://www.nextflow.io/docs/latest/install.html)
-* [`nf-live-tracking` plugin](https://github.com/vishnubk/nf-live-tracking)
-* Apptainer/Singularity
-* Kafka + MySQL/MariaDB backend for candidate streaming
+To run the One Ring pipeline, the following components are required:
 
----
+**1. MariaDB or MySQL database**
 
-## Setup
+* Schema files are included under `include/db_schemas/`
+* Can be hosted locally or inside Docker
 
-### 1. Install Nextflow (one time per cluster)
+**2. Apache Kafka**
 
-```bash
-curl -s https://get.nextflow.io | bash
-```
+* A working Kafka + Kafka Connect setup
+* Docker Compose configuration is available at [compact\_kafka](https://github.com/erc-compact/compact_kafka)
+* A self-contained version will also be included in `include/` in this repository
 
-Add `nextflow` to your `$PATH`.
+**3. Docker**
 
----
+* Required to launch Kafka services if using Docker
 
-### 2. Install `nf-live-tracking` (one time per cluster)
-Clone the [`repo`](https://github.com/vishnubk/nf-live-tracking) and run
-```bash
-make compile && make install
-```
+**4. Nextflow**
 
----
+* Must be installed on each compute cluster
+* Requires Java 8 or later
 
-### 3. Pull required Singularity images
+**5. Apptainer (Singularity)**
 
-Each processing step relies on containerized tools hosted on DockerHub.
-To pull them:
+* Used to run all processing and monitoring steps
 
-```bash
-apptainer pull docker://vishnubk/<software_name>:<tag>
-```
+**6. nf-live-tracking plugin**
 
-**Examples:**
+* Installed once per compute cluster
+* Captures Nextflow events as structured JSON logs
 
-```bash
-apptainer pull docker://vishnubk/pulsarx:latest
-apptainer pull docker://vishnubk/peasoup:keplerian
-```
+**7. SSH access (if required)**
 
-Ensure your `apptainer` (or `singularity`) is correctly configured with the right mount paths for your HPC environment.
+* Used for secure forwarding of Kafka and DB traffic from clusters to the control node
+
+No additional system packages or Python dependencies are required. All steps run inside containerized environments.
 
 ---
 
 ## Usage
 
-Run the pipeline with an appropriate profile for your cluster. Example:
+Each cluster runs the pipeline independently using a configuration profile:
+
+```bash
+nextflow run search_pipeline.nf -profile <cluster-name>
+```
+
+Example:
 
 ```bash
 nextflow run search_pipeline.nf -profile contra
 ```
 
-Cluster-specific configs are stored in `configs/`.
-Scratch directories, intermediate config files, and logs are managed automatically under `scratch/`.
+Each profile should be defined in the `configs/` directory. 
 
 ---
 
-## Repository Layout 
+## Repository Layout
 
 ```plaintext
 .
-├── search_pipeline.nf      # Main pipeline entrypoint
-├── nextflow.config         # Base config
-├── configs/                # Cluster-specific configs: contra.config, hercules.config, etc.
-├── scripts/                # Python/Bash Scripts used by Nextflow for data analysis
-├── scratch/                # Runtime transient files 
+├── search_pipeline.nf          # Main Nextflow pipeline
+├── modules.nf                  # Definition for each process inside search_pipeline.nf
+├── nextflow.config             # Global Nextflow configuration
+├── configs/                    # Cluster-specific configs (e.g. contra.config)
+├── scripts/                    # Python/Bash utilities (run via Apptainer)
+├── include/
+│   ├── fold_templates/         # Fold templates for PulsarX
+│   └── avro_schema             # Avro schema files for kafka-connect
 └── README.md
 ```
 
 ---
 
+
+
 ## Notes
 
-* Use `--resume` to safely resume incomplete runs.
-* Database and Kafka connections are handled via environment variables or `nextflow.config` secrets — adapt accordingly for each HPC.
-* All runtime-generated files (Nextflow configs, Docker image digests, logs) are written to `scratch/` by default.
-* This pipeline assumes you have valid baseband or filterbank data prepared and accessible to each compute node.
+* The pipeline supports full restart with `--resume` using Nextflow’s built-in checkpointing.
+* Kafka messages are sent in Avro format, and schemas are provided under `include/avro_schema`. See the [SETUP.md](SETUP.md) for more details.
+* Each Kafka topic maps directly to a specific table in the database, ensuring logical separation of message streams.
+* The database uses UUIDs as primary keys across many tables. This allows completely decentralized processing without needing to coordinate with the central database during runtime.
+* The watchdog script is **idempotent** and supports checkpointing. Re-running the same watchdog on previously processed JSON logs does not generate duplicate entries or new UUIDs.
+
+---
 
 ---
 
 ## To Do
 
-* Write more Documentation.
-* Add support for Jerk Searches, FFA, and PRESTO.
+* Add support for jerk searches, FFA, and PRESTO
+* Include Kafka and DB Docker Compose inside this repository under `include/`
+* Add optional monitoring dashboards for Kafka
+* Provide cloud-ready deployment examples (e.g. AWS Batch or Spot Instances)
 
 ---
 
 ## Contact
 
-If you find a bug or have a feature request, please open an issue or reach out directly.
+For bug reports, feature requests, or questions, please open an [issue](https://github.com/vishnubk/one_ring/issues) or reach out directly.
 
----
