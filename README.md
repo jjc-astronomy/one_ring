@@ -26,7 +26,7 @@ All software components run inside containerized environments managed by [Apptai
 ## Key Features
 
 * Distributed, cluster-independent pulsar search using [Nextflow](https://www.nextflow.io/).
-* Currently supports Acceleration (Johnston & Kulkanari 1991) and three and five Keplerian parameter template bank searches (Knispel et al. 2011, Balakrishnan et al. 2022) for circular and elliptical orbits.
+* Currently supports Acceleration ([Johnston & Kulkarni 1991](https://ui.adsabs.harvard.edu/abs/1991ApJ...368..504J/abstract)) and three and five Keplerian parameter template bank searches ([Knispel 2011](https://ui.adsabs.harvard.edu/abs/2011PhDT.......293K/abstract), [Balakrishnan et al. 2022](https://ui.adsabs.harvard.edu/abs/2022MNRAS.511.1265B/abstract)) for circular and elliptical orbits.
 * Real-time monitoring and candidate updates using [Apache Kafka](https://kafka.apache.org/).
 * Structured SQL-based  of all metadata: pointings, beams, candidates, folding, and logs.
 * Fault-tolerant architecture: processing continues if Kafka or DB is temporarily down.
