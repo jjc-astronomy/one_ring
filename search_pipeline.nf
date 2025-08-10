@@ -125,8 +125,8 @@ workflow {
 
         candy_picker_groups = params.candy_picker_groups
         candy_picker_input = peasoup_output.map { 
-        xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list ->
-        
+        xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list ->
+
         // Ensure coherent_dm is a BigDecimal (if not already)
         def cdm = coherent_dm instanceof BigDecimal ? coherent_dm : new BigDecimal(coherent_dm.toString())
         
@@ -137,7 +137,7 @@ workflow {
         }
         
         def groupKey = match ? match.toString() : 'none'
-        return tuple(groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list)
+        return tuple(groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list)
         }
         .groupTuple(by:[0, 9, 8, 10, 5, 7])
         //Group by the interval key -> 0
@@ -146,20 +146,38 @@ workflow {
         //beam id -> 10
         //beam name -> 5 (Using beam name is optional given that beam id is unique)
         //same search configuration eg full,half segment searches -> 7
-        // Candy pickers runs on same beam, cdm but different subband_dm
-        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list ->
-                
+        // Candy pickers runs on same target, utc_start, beam, cdm but different subband_dm
+        /* 
+        Note for future Developers: Because we choose to 
+        groupby by 7 (same search configuration), this means that if you 
+        split the peasoup config by acc.range, or template bank range, 
+        eg config1 runs between acc = -20 to -10 ms-2, 
+        config2 acc = -10, to 0 ms-2, 
+        we do NOT run candy picker across them. 
+        Those two configs will be run separately!
+        If such a feature arises, then do the following:
+        1. Ensure peasoup process in modules.nf emits start_sample and FFT size as output.
+        2. Propagate it downstream and group by those two fields as well, but remove 7 (search configuration).
+        3. Now that 7 is not grouped by, cfg_name would become a list cfg_name_list similar to dm_start_list/xml_dp_id_list
+        4. Inside the candy_picker process in modules.nf, cfg_name would now become a bash array, similar to filstr_list/dm_start_list/dm_end_list, iterate through it.
+        5. Ensure that if candy_picker is switched off (else condition), start sample and FFT size is also emitted from peasoup process (start_sample, fft_size ->).
+        
+        */ 
+        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list, dm_start_list, dm_end_list ->
+
             // Sort coherent_dm in ascending order along with the corresponding lists to guarantee consistent ordering
             def combined = []
             (0..<coherent_dm.size()).each { i ->
-                combined << [cdm: new BigDecimal(coherent_dm[i].toString()), xml: xml_list[i], xml_dp: xml_dp_id_list[i], filstr: filstr_list[i]]
+                combined << [cdm: new BigDecimal(coherent_dm[i].toString()), xml: xml_list[i], xml_dp: xml_dp_id_list[i], filstr: filstr_list[i], dm_start: dm_start_list[i], dm_end: dm_end_list[i]]
             }
             def combined_sorted = combined.sort { a, b -> a.cdm <=> b.cdm }
             def sorted_coherent_dm = combined_sorted.collect { it.cdm }
             def sorted_xml_list = combined_sorted.collect { it.xml }
             def sorted_xml_dp_id_list = combined_sorted.collect { it.xml_dp }
             def sorted_filstr_list = combined_sorted.collect { it.filstr }
-
+            def sorted_dm_start_list = combined_sorted.collect { it.dm_start }
+            def sorted_dm_end_list = combined_sorted.collect { it.dm_end }
+            
             return [
                 program_name : 'candy_picker',
                 pipeline_id  : params.pipeline_id,
@@ -173,7 +191,9 @@ workflow {
                 coherent_dm  : sorted_coherent_dm,
                 cfg_name     : cfg_name,
                 filstr       : sorted_filstr_list.join(" "),
-                segment_pepoch : segment_pepoch[0]
+                segment_pepoch : segment_pepoch[0],
+                dm_start    : sorted_dm_start_list.join(" "),
+                dm_end      : sorted_dm_end_list.join(" ")
             ]
             
         }
@@ -181,12 +201,11 @@ workflow {
 
 
 
-
         candy_picker_output = candy_picker(candy_picker_input)
 
 
-        candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch ->
-            
+        candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch, dm_start, dm_end ->
+
             return [
                     output_dp      : output_dp,
                     output_dp_id   : output_dp_id,
@@ -197,7 +216,9 @@ workflow {
                     utc_start      : utc_start,
                     target_name    : target_name,
                     beam_id        : beam_id,
-                    filstr         : filstr
+                    filstr         : filstr,
+                    dm_start       : dm_start,
+                    dm_end         : dm_end
                 ]
                 
         }
@@ -214,6 +235,9 @@ workflow {
             // For coherent_dm and filstr, we assume each entry corresponds to a pair (one accepted and one rejected).
             def cohDMs = (record.coherent_dm instanceof List) ? record.coherent_dm : record.coherent_dm.toString().split(/\s+/).findAll { it.trim() }
             def filstrs = record.filstr.toString().split(/\s+/).findAll { it.trim() }
+            def dmStarts = record.dm_start.toString().split(/\s+/).findAll { it.trim() }
+            def dmEnds = record.dm_end.toString().split(/\s+/).findAll { it.trim() }
+
             
             // Determine the number of pairs (each pair contains an accepted and a rejected file)
             def nPairs = files.size() / 2
@@ -253,7 +277,9 @@ workflow {
                         utc_start      : record.utc_start,
                         target_name    : record.target_name,
                         beam_id        : record.beam_id,
-                        filstr         : filstrs[i]
+                        filstr         : filstrs[i],
+                        dm_start       : dmStarts[i],
+                        dm_end         : dmEnds[i]
                     ]
                 
             }
@@ -288,13 +314,15 @@ workflow {
                 beam_name        : candy_picker_map.beam_name,
                 coherent_dm      : candy_picker_map.coherent_dm,
                 cfg_name         : candy_picker_map.cfg_name,
-                filstr           : candy_picker_map.filstr
+                filstr           : candy_picker_map.filstr,
+                dm_start         : candy_picker_map.dm_start,
+                dm_end           : candy_picker_map.dm_end
             ]
         }
     }
     else {
 
-        peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr ->
+        peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end ->
         [
             segment_pepoch.toString(),
             [
@@ -307,7 +335,9 @@ workflow {
                 utc_start      : utc_start,
                 target_name    : target_name,
                 beam_id        : beam_id,
-                filstr         : filstr
+                filstr         : filstr,
+                dm_start       : dm_start,
+                dm_end         : dm_end
             ]
         ]
     }
@@ -328,7 +358,9 @@ workflow {
             beam_name        : peasoup_map.beam_name,
             coherent_dm      : peasoup_map.coherent_dm,
             cfg_name         : peasoup_map.cfg_name,
-            filstr           : peasoup_map.filstr
+            filstr           : peasoup_map.filstr,
+            dm_start         : peasoup_map.dm_start,
+            dm_end           : peasoup_map.dm_end
         ]
     }
 
@@ -338,7 +370,7 @@ workflow {
 
     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
 
-        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end ->
             [
                 program_name    : "pics",
                 pipeline_id     : params.pipeline_id,
@@ -354,7 +386,9 @@ workflow {
                 utc_start : utc_start,
                 cfg_name : cfg_name,
                 filstr : filstr,
-                archive_source_dir : publish_dir
+                archive_source_dir : publish_dir,
+                dm_start : dm_start,
+                dm_end : dm_end
             ]
             
         }
@@ -363,7 +397,7 @@ workflow {
      }
     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
-        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr ->
+        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end ->
             [
                 program_name    : "post_folding_heuristics",
                 pipeline_id     : params.pipeline_id,
@@ -379,12 +413,15 @@ workflow {
                 utc_start : utc_start,
                 cfg_name : cfg_name,
                 filstr : filstr,
-                archive_source_dir : publish_dir
+                archive_source_dir : publish_dir,
+                dm_start : dm_start,
+                dm_end : dm_end
             ]
             
         }
         
         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
 }
-}
 
+
+}

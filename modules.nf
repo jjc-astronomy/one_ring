@@ -107,8 +107,8 @@ process peasoup {
           val(target_name)
     
     output:
-    tuple path(output_dp), env(output_dp_id), env(publish_dir), env(segment_pepoch), val(beam_name), val(coherent_dm), env(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr)
-    publishDir "${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.cfg_name}/", mode: 'copy'
+    tuple path(output_dp), env(output_dp_id), env(publish_dir), env(segment_pepoch), val(beam_name), val(coherent_dm), env(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(program_args.dm_start), val(program_args.dm_end)
+    publishDir "${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.dm_start}_${program_args.dm_end}/${program_args.cfg_name}/", mode: 'copy'
 
     script:
     """
@@ -124,7 +124,7 @@ process peasoup {
         fi
         return 0
     }
-    publish_dir="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.cfg_name}/"
+    publish_dir="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.dm_start}_${program_args.dm_end}/${program_args.cfg_name}/"
 
 
     # Write out dm_file.txt
@@ -233,10 +233,12 @@ process candy_picker{
           val(coherent_dm_list),
           val(cfg_name),
           val(filstr),
-          val(segment_pepoch)
+          val(segment_pepoch),
+          val(dm_start),
+          val(dm_end)
 
     output:
-    tuple env(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(coherent_dm_list), val(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(segment_pepoch)
+    tuple env(output_dp), env(output_dp_id), env(publish_dir), val(beam_name), val(coherent_dm_list), val(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(segment_pepoch), val(dm_start), val(dm_end)
 
     script:
     """
@@ -253,38 +255,49 @@ process candy_picker{
         return 0
     }
     
+    filstr_array=(${filstr})
+    dm_start_array=(${dm_start})
+    dm_end_array=(${dm_end})
+    filename="output.xml"
 
     candy_picker_input_file_string=""
-    for filename_prefix in ${filstr}; do
-        #Define directory strucure
-        dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${filename_prefix}/${params.pipeline_name}/${cfg_name}/"
-        filename="output.xml"
-        # Create a directory with filename_prefix as its name
-        mkdir -p \${filename_prefix}
+    for i in "\${!filstr_array[@]}"; do
+        filename_prefix="\${filstr_array[i]}"
+        current_dm_start="\${dm_start_array[i]}"
+        current_dm_end="\${dm_end_array[i]}"
+
+        # Define the directory structure
+        dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${filename_prefix}/${params.pipeline_name}/\${current_dm_start}_\${current_dm_end}/${cfg_name}/"
+        # Create a directory with the filename prefix as its name
+        candyjar_input_dir="\${filename_prefix}/\${current_dm_start}_\${current_dm_end}"
+        mkdir -p \${candyjar_input_dir}
+
         # Copy the output.xml file to the directory
-        cp \${dirname}/\${filename} \${filename_prefix}/
+        cp \${dirname}/\${filename} \${candyjar_input_dir}/
+
         # Append the filename to the input file string
-        candy_picker_input_file_string="\${candy_picker_input_file_string} \${filename_prefix}/\${filename}"
+        candy_picker_input_file_string="\${candy_picker_input_file_string} \${candyjar_input_dir}/\${filename}"
     done
 
     # Run candy_picker
-
     candy_picker -p ${params.candidate_filter.candy_picker.period_tolerance} -d ${params.candidate_filter.candy_picker.dm_tolerance} -n ${task.cpus} \${candy_picker_input_file_string}
     
     # Check if candy_picker command succeeded
     check_status
-    output_dp=\$(ls -v **/output_*.xml | xargs realpath | tr '\n' ' ')
+    output_dp=\$(ls -v **/**/output_*.xml | xargs realpath | tr '\n' ' ')
     output_dp_id=""
     for file in \$output_dp; do
         uuid=\$(uuidgen)
         output_dp_id="\$output_dp_id \$uuid"
     done
 
-    output_files_relative_path=\$(ls -v **/output_*.xml)
+    output_files_relative_path=\$(ls -v **/**/output_*.xml)
     publish_dir=""
     for file in \$output_files_relative_path; do
         dirname=\$(dirname \$file)
-        publish_dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${dirname}/${params.pipeline_name}/${cfg_name}/"
+        filstr_dir=\$(echo "\$dirname" | cut -d'/' -f1)  
+        dm_range_dir=\$(echo "\$dirname" | cut -d'/' -f2) 
+        publish_dirname="${params.publish_dir_prefix}/05_SEARCH/${target_name}/${utc_start}/\${filstr_dir}/${params.pipeline_name}/\${dm_range_dir}/${cfg_name}/"
         publish_dir="\${publish_dir} \${publish_dirname}"
     done
 
@@ -317,7 +330,7 @@ process pulsarx {
     label 'pulsarx'
     container "${params.apptainer_images.pulsarx}"
     //publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{png,cands,csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/", pattern: "*.{png,cands,csv}", mode: 'copy'
 
     input:
     tuple val(program_name),
@@ -335,11 +348,13 @@ process pulsarx {
           val(beam_name), 
           val(coherent_dm), 
           val(cfg_name),
-          val(filstr)
+          val(filstr),
+          val(dm_start),
+          val(dm_end)
     
     output:
     //path(*.ar, *.png) are kept for downstream processes, and env (output_archives, outputplots) for the database.
-    tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr)
+    tuple path("*.ar"), path("*.png"), path("*.cands"), path("*.csv"), path("search_fold_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), env(pulsarx_cands_file), env(fold_candidate_id), env(search_fold_merged), val(target_name), val(beam_id), val(utc_start), val(cfg_name), val(filstr), val(dm_start), val(dm_end)
 
     script:
     def custom_nbin_arg = program_args.custom_nbin_plan != null ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
@@ -360,7 +375,7 @@ process pulsarx {
         return 0
     }
 
-    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
+    publish_dir="${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
     echo "Running PulsarX folding with the following command:"
@@ -422,7 +437,7 @@ process pulsarx {
 process pics{
     label 'pics'
     container "${params.apptainer_images.pics}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.csv", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/", pattern: "*.csv", mode: 'copy'
     //errorStrategy 'ignore'
     
 
@@ -451,7 +466,9 @@ process pics{
           val(utc_start),
           val(cfg_name),
           val(filstr),
-          val(archive_source_dir)
+          val(archive_source_dir),
+          val(dm_start),
+          val(dm_end)
           
     output:
     tuple path("search_fold_pics_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
@@ -470,7 +487,7 @@ process pics{
         return 0
     }
     echo "Running PICS"
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/PICS/"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/PICS/"
     mkdir -p \${publish_dir}
     python ${params.candidate_filter.ml_candidate_scoring.pics_script} -i \$(pwd) -m ${params.candidate_filter.ml_candidate_scoring.models_dir} -f ${search_fold_merged} -g --create_shortlist_csv -s ${archive_source_dir} -p \${publish_dir}
     # Check if python command succeeded
@@ -485,7 +502,7 @@ process pics{
 process post_folding_heuristics{
     label 'post_folding_heuristics'
     container "${params.apptainer_images.pulsarx}"
-    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "search_postfold_heuristics_merged.csv", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/", pattern: "search_postfold_heuristics_merged.csv", mode: 'copy'
 
     //errorStrategy 'ignore'
 
@@ -514,7 +531,9 @@ process post_folding_heuristics{
           val(utc_start),
           val(cfg_name),
           val(filstr),
-          val(archive_source_dir)
+          val(archive_source_dir),
+          val(dm_start),
+          val(dm_end)
           
     output:
     tuple path("search_postfold_heuristics_merged.csv"), val(foldGroupName), env(output_dp), env(output_dp_id), env(publish_dir), val(beam_id)
@@ -533,7 +552,7 @@ process post_folding_heuristics{
         fi
         return 0
     }
-    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/"
+    publish_dir="${params.publish_dir_prefix}/10_FOLD_FIL_FILTER/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/"
     mkdir -p \${publish_dir}
 
     python ${params.candidate_filter.calculate_post_folding_heuristics.script} -i ${search_fold_merged} --num_workers ${task.cpus} --threshold ${params.candidate_filter.calculate_post_folding_heuristics.alpha_snr_threshold} --create_shortlist_csv -g -s ${archive_source_dir} -p \${publish_dir}
