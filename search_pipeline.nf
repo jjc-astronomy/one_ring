@@ -100,7 +100,12 @@ workflow {
         ]
     }
     peasoup_output = peasoup(peasoup_input)
-
+    peasoup_output.view()
+    if(params.search_only){
+        all_peasoup = peasoup_output.collect()
+        return
+    }
+    else {
 
     def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
     
@@ -421,7 +426,7 @@ workflow {
         }
         
         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
-}
-
+    }
+    }
 
 }
