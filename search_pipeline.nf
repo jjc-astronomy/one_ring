@@ -41,6 +41,11 @@ workflow {
     // Run the filtool process on each emitted value in parallel
     filtool_output = filtool(filtool_input)
 
+    if (params.filtool_only) {
+        all_filtool = filtool_output.collect()
+        return
+    }
+
     // filtool_mapped emits one item per filtool result keyed by coherent_dm
     filtool_mapped = filtool_output.map { output_dp, output_dp_id, publish_dir, beam_name, beam_id, coherent_dm, tsamp, tobs, nsamples, freq_start_mhz, freq_end_mhz, tstart, tstart_utc, nchans, nbits, filstr ->
     [
@@ -100,12 +105,10 @@ workflow {
         ]
     }
     peasoup_output = peasoup(peasoup_input)
-    peasoup_output.view()
     if(params.search_only){
         all_peasoup = peasoup_output.collect()
         return
     }
-    else {
 
     def pulsarx_prog = params.programs.findAll { it.program_name == 'pulsarx' }
     
@@ -426,7 +429,6 @@ workflow {
         }
         
         post_folding_heuristics_output = post_folding_heuristics(calculate_post_folding_heuristics_input)
-    }
     }
 
 }
