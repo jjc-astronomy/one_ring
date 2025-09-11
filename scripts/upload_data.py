@@ -274,6 +274,9 @@ class DatabaseUploader:
         filtool_arguments = {k: v for k, v in filtool_params.items() if k not in ['program_name', 'container_image_name', 'container_image_version', 'container_type', 'container_image_id', 'container_image_path']}
         self.json_builder.add_program_entry("filtool", filtool_id, filtool_metadata, filtool_arguments)
         
+        antenna_inserted = {}
+        keplerian_template_bank_inserted = {}
+        data_product_str_inserted = {}
         for _, row in df.iterrows():
             #Insert beam type
             beam_type_id = self._insert_beam_type(
@@ -310,16 +313,21 @@ class DatabaseUploader:
 
             for antenna in antenna_list:
                 #Insert antenna
-                antenna_id = self._insert_antenna(
-                    antenna,
-                    self.telescope_id,
-                    return_id=True
-                )
-                #Insert beam_antenna linked table. No need to return ID
-                self._insert_beam_antenna(
+                if antenna in antenna_inserted.keys():
+                    self.logger.info(f"Antenna {antenna} already inserted to DB, skip.")
+                    antenna_id = antenna_inserted[antenna]
+                else:
+                    antenna_id = self._insert_antenna(
+                        antenna,
+                        self.telescope_id,
+                        return_id=True
+                    )
+                    antenna_inserted.update({antenna: antenna_id})
+                    #Insert beam_antenna linked table. No need to return ID
+                    self._insert_beam_antenna(
                     antenna_id,
                     beam_id
-                )
+                    )
             #Insert file type
             file_type_id = self._insert_file_type(
                 beam_metadata['file_ext'],
@@ -330,29 +338,36 @@ class DatabaseUploader:
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
                 dp_metadata['filepath'] = dp_metadata['filepath'].replace("/b/PROCESSING", "/fred/oz002/vvenkatr/COMPACT")
-                dp_id = self._insert_data_product(
-                    beam_id,
-                    file_type_id,
-                    dp_metadata['filename'],
-                    dp_metadata['filepath'],
-                    available=1,
-                    locked=0,
-                    utc_start=dp_metadata['tstart_utc'],
-                    tsamp_seconds=dp_metadata['tsamp'],
-                    tobs_seconds=dp_metadata['tobs'],
-                    nsamples=dp_metadata['nsamples'],
-                    freq_start_mhz=dp_metadata['freq_start_mhz'],
-                    freq_end_mhz=dp_metadata['freq_end_mhz'],
-                    hardware_id=self.hardware_id,
-                    nchans=dp_metadata['nchans'],
-                    nbits=dp_metadata['nbits'],
-                    mjd_start=dp_metadata['tstart_mjd'],
-                    filehash=None,
-                    metainfo=None,
-                    coherent_dm=row['coherent_dm'] if 'coherent_dm' in row else None,
-                    subband_dm=row['subband_dm'] if 'subband_dm' in row else None,
-                    return_id=True
-                )
+                data_product_str = '%d;%d;%s;%s;%d'%(beam_id, file_type_id, dp_metadata['filename'], dp_metadata['filepath'], self.hardware_id)
+                print(data_product_str)
+                if data_product_str in data_product_str_inserted.keys():
+                    self.logger.info(f"Data product {dp_metadata['filename']} already inserted to DB, skip.")
+                    dp_id = data_product_str_inserted[data_product_str]
+                else:
+                    dp_id = self._insert_data_product(
+                        beam_id,
+                        file_type_id,
+                        dp_metadata['filename'],
+                        dp_metadata['filepath'],
+                        available=1,
+                        locked=0,
+                        utc_start=dp_metadata['tstart_utc'],
+                        tsamp_seconds=dp_metadata['tsamp'],
+                        tobs_seconds=dp_metadata['tobs'],
+                        nsamples=dp_metadata['nsamples'],
+                        freq_start_mhz=dp_metadata['freq_start_mhz'],
+                        freq_end_mhz=dp_metadata['freq_end_mhz'],
+                        hardware_id=self.hardware_id,
+                        nchans=dp_metadata['nchans'],
+                        nbits=dp_metadata['nbits'],
+                        mjd_start=dp_metadata['tstart_mjd'],
+                        filehash=None,
+                        metainfo=None,
+                        coherent_dm=row['coherent_dm'] if 'coherent_dm' in row else None,
+                        subband_dm=row['subband_dm'] if 'subband_dm' in row else None,
+                        return_id=True
+                    )
+                    data_product_str_inserted.update({data_product_str: dp_id})
                 dp_id_list.append(dp_id)
                 
             #Check if this observation is processed in a different cluster.
@@ -389,7 +404,7 @@ class DatabaseUploader:
 
         
         
-        peasoup_params = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df)
+        peasoup_params, keplerian_template_bank_inserted = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df, keplerian_template_bank_inserted)
         # Add each peasoup record as a separate program entry in JSON
         # peasoup_records is a list of dicts, each representing a peasoup configuration with arguments and peasoup_id
         for peasoup_record in peasoup_params:
@@ -596,7 +611,7 @@ class DatabaseUploader:
 
         return pepoch, start_fraction, end_fraction, effective_tobs
 
-    def _store_peasoup_configs(self, nextflow_cfg, docker_hash_df, df):
+    def _store_peasoup_configs(self, nextflow_cfg, docker_hash_df, df, keplerian_template_bank_inserted):
         """
         - Reads peasoup configs (JSON string) and dd_plan (colon-sep strings).
         - Matches filterbank rows by coherent DM.
@@ -658,10 +673,16 @@ class DatabaseUploader:
                         keplerian_template_bank_filename = peasoup_cfg.get('keplerian_template_bank')
                         if keplerian_template_bank_filename:
                             if os.path.exists(keplerian_template_bank_filename):
-                                self.logger.info(f"Found Keplerian template bank file {keplerian_template_bank_filename}. Inserting into DB.")
-                                keplerian_template_bank_id = self._insert_keplerian_template_bank(keplerian_template_bank_filename,generate_file_hash=True, return_id=True)
-                                entry['keplerian_template_bank_id'] = keplerian_template_bank_id
-                                entry['keplerian_template_bank'] = keplerian_template_bank_filename
+                                if keplerian_template_bank_filename in keplerian_template_bank_inserted.keys():
+                                    self.logger.info(f"Found Keplerian template bank file {keplerian_template_bank_filename}. Already inserted to DB, skip.")
+                                    entry['keplerian_template_bank_id'] = keplerian_template_bank_inserted[keplerian_template_bank_filename]
+                                    entry['keplerian_template_bank'] = keplerian_template_bank_filename
+                                else:
+                                    self.logger.info(f"Found Keplerian template bank file {keplerian_template_bank_filename}. Inserting into DB.")
+                                    keplerian_template_bank_id = self._insert_keplerian_template_bank(keplerian_template_bank_filename,generate_file_hash=True, return_id=True)
+                                    entry['keplerian_template_bank_id'] = keplerian_template_bank_id
+                                    entry['keplerian_template_bank'] = keplerian_template_bank_filename
+                                    keplerian_template_bank_inserted.update({keplerian_template_bank_filename: keplerian_template_bank_id})
                             else:
                                 self.logger.error(f"Keplerian template bank file {keplerian_template_bank_filename} does not exist. Please check the path.")
                                 self.logger.error("Exiting the program.")
@@ -684,7 +705,7 @@ class DatabaseUploader:
                         all_peasoup_records.append(entry)
 
         
-        return all_peasoup_records
+        return(all_peasoup_records, keplerian_template_bank_inserted)
                         
     def _parse_nextflow_flat_config_from_file(self, file_path):
 
