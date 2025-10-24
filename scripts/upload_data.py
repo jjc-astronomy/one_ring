@@ -337,7 +337,7 @@ class DatabaseUploader:
             
             for filename in row['filenames'].split():
                 dp_metadata = self._extract_file_header(filename)
-                dp_metadata['filepath'] = dp_metadata['filepath'].replace("/b/PROCESSING", "/fred/oz002/vvenkatr/COMPACT")
+                #dp_metadata['filepath'] = dp_metadata['filepath'].replace("/b/PROCESSING", "/fred/oz002/vvenkatr/COMPACT")
                 data_product_str = '%d;%d;%s;%s;%d'%(beam_id, file_type_id, dp_metadata['filename'], dp_metadata['filepath'], self.hardware_id)
                 print(data_product_str)
                 if data_product_str in data_product_str_inserted.keys():
