@@ -359,7 +359,7 @@ process pulsarx {
     script:
     def custom_nbin_arg = program_args.custom_nbin_plan != null ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
     def extra_args = program_args.extra_args != null ? "--extra_args=\"${program_args.extra_args}\"" : ""
-    def avoid_folding_file = program_args.avoid_folding_file != null ? "--avoid_folding_file=\"${program_args.avoid_folding_file}\"" : ""
+    def avoid_folding_file = program_args.avoid_folding_file != "null" ? "--avoid_folding_file=\"${program_args.avoid_folding_file}\"" : ""
 
     """
     #!/bin/bash
