@@ -146,7 +146,7 @@ bash "$SCRIPT_DIR/get_docker_image_hash.sh"
 echo "Docker digests written to $DOCKER_HASH_FILE"
 
 # === Source env ===
-source ~/.bashrc
+# source ~/.bashrc
 
 # === Build and run upload ===
 echo "Running upload..."
