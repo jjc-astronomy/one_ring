@@ -157,6 +157,7 @@ run_script="$apptainer_cmd python $REPO_ROOT/$upload_script \
   --nextflow_cfg $NF_CONFIG_FILE \
   --docker_hash_file $DOCKER_HASH_FILE \
   --hardware_name $hardware_name \
+  --skip_database \
   --verbose "
 
 echo "Command:"
