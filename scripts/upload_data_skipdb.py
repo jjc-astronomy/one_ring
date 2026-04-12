@@ -667,7 +667,7 @@ class DatabaseUploader:
                 cdm_data = row.get('subband_dm') or row.get('coherent_dm') or 0.0
                 if float(cdm_data) == float(coherent_dm):
                     # For each peasoup config block in peasoup_configs
-                    for peasoup_cfg in peasoup_configs:
+                    for j, peasoup_cfg in enumerate(peasoup_configs):
                         # Create a fresh dict to insert, merging peasoup_params + dd_plan fields + peasoup_cfg
                         entry = dict(peasoup_params)
 
@@ -718,7 +718,7 @@ class DatabaseUploader:
                                 sys.exit(1)
                         # Add the tscrunch value from the dd_plan
                         if skip_database:
-                            peasoup_id = i + 1 #255
+                            peasoup_id = j + 1 #255
                         else:
                             # Insert into DB, retrieve ID
                             peasoup_id = self._insert_peasoup(entry, return_id=True)
