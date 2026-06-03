@@ -659,7 +659,7 @@ class DatabaseUploader:
         # We'll collect all peasoup DB entries in a list
         all_peasoup_records = []
 
-        for dd_str in ddplan_list:
+        for k, dd_str in enumerate(ddplan_list):
             coherent_dm, start_dm, end_dm, dm_step, tscrunch = self._process_ddplan_entry(dd_str)
 
             # For each row in your filterbank DataFrame, match the DM
@@ -718,7 +718,7 @@ class DatabaseUploader:
                                 sys.exit(1)
                         # Add the tscrunch value from the dd_plan
                         if skip_database:
-                            peasoup_id = j + 1 #255
+                            peasoup_id = k * len(peasoup_configs) * len(df) + i * len(peasoup_configs) + j + 1 #255
                         else:
                             # Insert into DB, retrieve ID
                             peasoup_id = self._insert_peasoup(entry, return_id=True)
