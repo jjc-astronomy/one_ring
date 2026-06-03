@@ -98,7 +98,7 @@ HOSTNAME_PREFIXES["ngarrgu"]="tooarrana"
 
 SINGULARITY_IMAGE_PATHS["DZA"]="/data/narwhal/usr/projects/p_dza_mpifr_compact/singularity_images"
 MOUNTS["DZA"]="-B /data/narwhal/usr/projects/p_dza_mpifr_compact/"
-HOSTNAME_PREFIXES["DZA"]="login2.barnard.hpc.tu-dresden.de"
+HOSTNAME_PREFIXES["DZA"]="login2"
 
 # === Validate hardware_name ===
 if [[ -z "${SINGULARITY_IMAGE_PATHS[$hardware_name]+x}" ]]; then
