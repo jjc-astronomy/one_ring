@@ -3,7 +3,7 @@ set -euo pipefail
 
 # === Function: help ===
 show_help() {
-    echo "Usage: $0 -c <csv_file> -m <metadata_file> -p <pointing_idx> [--hardware-name contra|hercules|ozstar|ngarrgu]"
+    echo "Usage: $0 -c <csv_file> -m <metadata_file> -p <pointing_idx> [--hardware-name contra|hercules|ozstar|ngarrgu|DZA]"
     echo
     echo "COMPACT DATABASE UPLOAD: Uploads raw files + metadata + Nextflow config."
     echo "Arguments:"
@@ -95,6 +95,10 @@ HOSTNAME_PREFIXES["ozstar"]="farnarkle"
 SINGULARITY_IMAGE_PATHS["ngarrgu"]="/fred/oz002/vishnu/singularity_images"
 MOUNTS["ngarrgu"]="-B /fred"
 HOSTNAME_PREFIXES["ngarrgu"]="tooarrana"
+
+SINGULARITY_IMAGE_PATHS["DZA"]="/data/narwhal/usr/projects/p_dza_mpifr_compact/singularity_images"
+MOUNTS["DZA"]="-B /data/narwhal/usr/projects/p_dza_mpifr_compact/"
+HOSTNAME_PREFIXES["DZA"]="login2.barnard.hpc.tu-dresden.de"
 
 # === Validate hardware_name ===
 if [[ -z "${SINGULARITY_IMAGE_PATHS[$hardware_name]+x}" ]]; then
