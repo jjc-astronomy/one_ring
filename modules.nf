@@ -128,7 +128,7 @@ process peasoup {
 
 
     # Write out dm_file.txt
-    python -c "import numpy as np; dm_trials = np.arange(${program_args.dm_start}, ${program_args.dm_end}, ${program_args.dm_step}); f=open('dm_file.txt','w'); f.writelines(f'{dm}\\n' for dm in dm_trials); f.close()"
+    python -c "import numpy as np; dm_trials = np.arange(${program_args.dm_start}, ${program_args.dm_end} - ${program_args.dm_step}/2., ${program_args.dm_step}); f=open('dm_file.txt','w'); f.writelines(f'{dm}\\n' for dm in dm_trials); f.close()"
     check_status
     # Accumulate optional arguments
     optional_args=""
