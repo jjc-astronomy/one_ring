@@ -2,6 +2,7 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 
 include { filtool; peasoup; candy_picker; pulsarx; pics; post_folding_heuristics } from './modules'
+include { peasoup as peasoup_hierarchical; generate_fine_template_bank; merge_hierarchical_candidates } from './modules'
 
 
 workflow {
@@ -73,6 +74,19 @@ workflow {
     // Suppose peasoup_prog is a list of multiple entries all with coherent_dm=120.0
     def peasoup_prog = params.programs.findAll { it.program_name == 'peasoup' }
 
+    /*
+     * Publish directories. Stage 1 normally goes to 05_SEARCH / 09_FOLD_FIL / 10_FOLD_FIL_FILTER. When the
+     * hierarchical search is switched on, everything produced by this run (stage-1 and stage-2 search results,
+     * folds and filters) goes to the hierarchical trees instead (hierarchical_search.*_publish_dir).
+     */
+    def hierarchical_enabled = params.hierarchical_search != null && params.hierarchical_search.enable == 1
+    def hierarchical_dirs = [
+        search_dir : params.hierarchical_search?.search_publish_dir ?: '11_HIERARCHICAL_SEARCH',
+        fold_dir   : params.hierarchical_search?.fold_publish_dir   ?: '12_HIERARCHICAL_SEARCH',
+        filter_dir : params.hierarchical_search?.filter_publish_dir ?: '13_HIERARCHICAL_SEARCH'
+    ]
+    def stage1_dirs = hierarchical_enabled ? hierarchical_dirs : [search_dir: '05_SEARCH', fold_dir: '09_FOLD_FIL', filter_dir: '10_FOLD_FIL_FILTER']
+
     // Emit multiple peasoup configs keyed by the same coherent_dm
     peasoup_input = Channel.from(peasoup_prog)
         .map { dp ->
@@ -89,7 +103,7 @@ workflow {
             program_name     : peasoup_prog.program_name[0],
             pipeline_id      : params.pipeline_id,
             hardware_id      : filtool_prog.data_products[0].hardware_id,
-            program_args     : peasoup_map.program_args,
+            program_args     : hierarchical_enabled ? peasoup_map.program_args + [search_dir: stage1_dirs.search_dir] : peasoup_map.program_args,
             program_id       : peasoup_map.program_id,
             input_dp         : filtool_map.output_dp,
             input_dp_id      : filtool_map.output_dp_id,
@@ -105,8 +119,192 @@ workflow {
         ]
     }
     peasoup_output = peasoup(peasoup_input)
+
+    /*
+     * Hierarchical (two-stage) template bank search (params.hierarchical_search.enable == 1).
+     *
+     * 1. The stage-1 peasoup results of one filterbank + segment (all template bank chunks and, if
+     *    merge_dm_ranges == 1, all incoherent DM ranges) are grouped together.
+     * 2. generate_fine_template_bank clusters the candidates in Legendre-coefficient space, keeps the
+     *    S/N peaks and builds a fine template bank around every peak (one or more chunk files).
+     * 3. peasoup runs again on the same filterbank with every fine template bank chunk (stage 2).
+     *    The stage-1 search arguments are reused; keys in params.hierarchical_search.peasoup_overrides
+     *    replace them. The DM range is the union of the stage-1 DM ranges of the group.
+     * 4. Optionally (merge_stage2 == 1) the stage-2 chunk results are merged into a single XML file
+     *    (clustered again if cluster_stage2 == 1), which is what gets folded.
+     *
+     * Everything downstream (candy_picker, pulsarx, pics, ...) consumes 'search_output'. Every record of
+     * 'search_output' carries, as its last element, the map of stage directories its products are published
+     * to (search_dir / fold_dir / filter_dir).
+     */
+    search_output = peasoup_output.map { rec -> rec + [stage1_dirs] }
+
+    if (params.hierarchical_search != null && params.hierarchical_search.enable == 1) {
+        def hs = params.hierarchical_search
+        def stage1_cfg_regex = hs.stage1_cfg_regex ?: '.*'
+        def stage2_dirs = hierarchical_dirs
+        def sameNumber = { a, b -> new BigDecimal(a.toString()).compareTo(new BigDecimal(b.toString())) == 0 }
+        def findStage1Program = { cfg_name, coherent_dm, dm_start, dm_end ->
+            peasoup_prog.find { p ->
+                p.arguments.cfg_name.toString() == cfg_name.toString() &&
+                sameNumber(p.arguments.coherent_dm, coherent_dm) &&
+                sameNumber(p.arguments.dm_start, dm_start) &&
+                sameNumber(p.arguments.dm_end, dm_end)
+            }
+        }
+        // Number of stage-1 peasoup runs that end up in the same group (same filterbank, same segment),
+        // so that a group can be released as soon as its own members have finished.
+        def stage1GroupSize = { prog ->
+            def a = prog.arguments
+            peasoup_prog.count { p ->
+                (p.arguments.cfg_name.toString() ==~ stage1_cfg_regex) &&
+                sameNumber(p.arguments.coherent_dm, a.coherent_dm) &&
+                p.arguments.fft_size.toString() == a.fft_size.toString() &&
+                p.arguments.start_sample.toString() == a.start_sample.toString() &&
+                p.arguments.nsamples.toString() == a.nsamples.toString() &&
+                (hs.merge_dm_ranges == 1 || (sameNumber(p.arguments.dm_start, a.dm_start) && sameNumber(p.arguments.dm_end, a.dm_end)))
+            }
+        }
+
+        hierarchical_groups = peasoup_output
+            .filter { rec -> rec[6].toString() ==~ stage1_cfg_regex }
+            .map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end ->
+                def stage1_prog = findStage1Program(cfg_name, coherent_dm, dm_start, dm_end)
+                if (stage1_prog == null) {
+                    throw new IllegalStateException("hierarchical_search: no peasoup program found for cfg_name=${cfg_name} coherent_dm=${coherent_dm} dm_start=${dm_start} dm_end=${dm_end}")
+                }
+                def pepoch_key = new BigDecimal(segment_pepoch.toString()).stripTrailingZeros().toPlainString()
+                def key = [target_name, utc_start, beam_id, beam_name, filstr, coherent_dm, pepoch_key]
+                if (hs.merge_dm_ranges != 1) key += [dm_start, dm_end]
+                def group_size = stage1GroupSize(stage1_prog)
+                def group_key = group_size > 0 ? groupKey(key.join('|'), group_size) : key.join('|')
+                tuple(group_key, output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end, stage1_prog)
+            }
+            .groupTuple(by: 0)
+            .map { key, xml_list, xml_dp_id_list, segment_pepoch_list, beam_name_list, coherent_dm_list, cfg_name_list, utc_start_list, target_name_list, beam_id_list, filstr_list, dm_start_list, dm_end_list, stage1_prog_list ->
+                // Stage-2 DM range: union of the stage-1 DM ranges (original string formatting is kept)
+                def i_min = (0..<dm_start_list.size()).min { new BigDecimal(dm_start_list[it].toString()) }
+                def i_max = (0..<dm_end_list.size()).max { new BigDecimal(dm_end_list[it].toString()) }
+                // Directory part of the stage-1 cfg names, e.g. "30m/ck02" for "30m/ck02/tb_ck000"
+                def cfg_bases = cfg_name_list.collect { c ->
+                    def cs = c.toString()
+                    cs.contains('/') ? cs.substring(0, cs.lastIndexOf('/')) : cs
+                }.unique().sort()
+                def cfg_base = cfg_bases.join('_')
+                def meta = [
+                    target_name         : target_name_list[0],
+                    utc_start           : utc_start_list[0],
+                    beam_name           : beam_name_list[0],
+                    beam_id             : beam_id_list[0],
+                    filstr              : filstr_list[0],
+                    coherent_dm         : coherent_dm_list[0],
+                    segment_pepoch      : segment_pepoch_list[0],
+                    dm_start            : dm_start_list[i_min],
+                    dm_end              : dm_end_list[i_max],
+                    cfg_base            : cfg_base,
+                    cfg_hier            : (hs.cfg_suffix ? "${cfg_base}/${hs.cfg_suffix}" : cfg_base).toString(),
+                    stage1_cfg_names    : cfg_name_list.collect { it.toString() },
+                    stage1_xml_dp_ids   : xml_dp_id_list,
+                    stage1_program_args : stage1_prog_list[0].arguments,
+                    stage1_program_id   : stage1_prog_list[0].program_id
+                ]
+                tuple(meta, xml_list)
+            }
+
+        fine_template_bank_output = generate_fine_template_bank(hierarchical_groups)
+
+        // Join the filterbank of the group back in (same utc, beam and filstr as the filtool output)
+        filtool_by_filstr = filtool_mapped.map { coherent_dm, filtool_map ->
+            tuple([filtool_map.tstart_utc, filtool_map.beam_id, filtool_map.filstr].join('|'), filtool_map)
+        }
+
+        // One stage-2 peasoup run per fine template bank chunk
+        stage2_input = fine_template_bank_output
+            .map { meta, template_banks, peaks_csv, summary_json ->
+                tuple([meta.utc_start, meta.beam_id, meta.filstr].join('|'), meta, template_banks)
+            }
+            .combine(filtool_by_filstr, by: 0)
+            .flatMap { join_key, meta, template_banks, filtool_map ->
+                def tb_list = template_banks instanceof List ? template_banks : [template_banks]
+                def overrides = hs.peasoup_overrides ?: [:]
+                tb_list.collect { tb ->
+                    def chunk = tb.getBaseName() - 'fine_tb_'
+                    def program_args = meta.stage1_program_args + overrides + [
+                        dm_start                : meta.dm_start,
+                        dm_end                  : meta.dm_end,
+                        keplerian_template_bank : tb.toString(),
+                        cfg_name                : "${meta.cfg_hier}/${chunk}".toString(),
+                        search_dir              : stage2_dirs.search_dir
+                    ]
+                    [
+                        program_name     : peasoup_prog.program_name[0],
+                        pipeline_id      : params.pipeline_id,
+                        hardware_id      : filtool_prog.data_products[0].hardware_id,
+                        program_args     : program_args,
+                        program_id       : meta.stage1_program_id,
+                        input_dp         : filtool_map.output_dp,
+                        input_dp_id      : filtool_map.output_dp_id,
+                        filstr           : filtool_map.filstr,
+                        utc_start        : filtool_map.tstart_utc,
+                        beam_name        : filtool_map.beam_name,
+                        beam_id          : filtool_map.beam_id,
+                        coherent_dm      : meta.coherent_dm,
+                        peasoup_orig_xml : "peasoup_results/overview.xml",
+                        output_dp        : "output.xml",
+                        target_name      : meta.target_name
+                    ]
+                }
+            }
+
+        stage2_output = peasoup_hierarchical(stage2_input)
+
+        if (hs.merge_stage2 == 1) {
+            // Number of chunks per group, so that the merge can start as soon as all chunks of a group are done
+            stage2_nchunks = fine_template_bank_output.map { meta, template_banks, peaks_csv, summary_json ->
+                def n = template_banks instanceof List ? template_banks.size() : 1
+                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), n)
+            }
+
+            merge_input = stage2_output
+                .map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end ->
+                    def cs = cfg_name.toString()
+                    def cfg_hier = cs.substring(0, cs.lastIndexOf('/'))
+                    def key = [target_name, utc_start, beam_id, filstr, dm_start, dm_end, cfg_hier].join('|')
+                    tuple(key, output_dp, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end)
+                }
+                .combine(stage2_nchunks, by: 0)
+                .map { key, output_dp, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end, nchunks ->
+                    tuple(groupKey(key, nchunks), output_dp, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end)
+                }
+                .groupTuple(by: 0)
+                .map { key, xml_list, segment_pepoch_list, beam_name_list, coherent_dm_list, cfg_hier_list, utc_start_list, target_name_list, beam_id_list, filstr_list, dm_start_list, dm_end_list ->
+                    def meta = [
+                        target_name    : target_name_list[0],
+                        utc_start      : utc_start_list[0],
+                        beam_name      : beam_name_list[0],
+                        beam_id        : beam_id_list[0],
+                        filstr         : filstr_list[0],
+                        coherent_dm    : coherent_dm_list[0],
+                        segment_pepoch : segment_pepoch_list[0],
+                        dm_start       : dm_start_list[0],
+                        dm_end         : dm_end_list[0],
+                        cfg_hier       : cfg_hier_list[0]
+                    ]
+                    tuple(meta, xml_list)
+                }
+
+            hierarchical_output = merge_hierarchical_candidates(merge_input)
+        }
+        else {
+            hierarchical_output = stage2_output
+        }
+
+        hierarchical_output = hierarchical_output.map { rec -> rec + [stage2_dirs] }
+        search_output = hs.fold_stage1_candidates == 1 ? hierarchical_output.mix(search_output) : hierarchical_output
+    }
+
     if(params.search_only){
-        all_peasoup = peasoup_output.collect()
+        all_peasoup = search_output.collect()
         return
     }
 
@@ -132,8 +330,8 @@ workflow {
     if (params.candidate_filter.candy_picker.enable == 1){
 
         candy_picker_groups = params.candy_picker_groups
-        candy_picker_input = peasoup_output.map { 
-        xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list ->
+        candy_picker_input = search_output.map { 
+        xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list, stage_dirs ->
 
         // Ensure coherent_dm is a BigDecimal (if not already)
         def cdm = coherent_dm instanceof BigDecimal ? coherent_dm : new BigDecimal(coherent_dm.toString())
@@ -145,9 +343,10 @@ workflow {
         }
         
         def groupKey = match ? match.toString() : 'none'
-        return tuple(groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list)
+        return tuple(groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch_list, beam_name, coherent_dm, cfg_name, utc_start_list, target_name, beam_id, filstr_list, dm_start_list, dm_end_list, stage_dirs)
         }
-        .groupTuple(by:[0, 9, 8, 10, 5, 7])
+        .groupTuple(by:[0, 9, 8, 10, 5, 7, 14])
+        //stage directories (stage 1 vs hierarchical stage 2) -> 14
         //Group by the interval key -> 0
         //target name -> 9
         // utc_start -> 8
@@ -171,7 +370,7 @@ workflow {
         5. Ensure that if candy_picker is switched off (else condition), start sample and FFT size is also emitted from peasoup process (start_sample, fft_size ->).
         
         */ 
-        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list, dm_start_list, dm_end_list ->
+        .map { groupKey, xml_list, xml_dp_id_list, publish_dir_list, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr_list, dm_start_list, dm_end_list, stage_dirs ->
 
             // Sort coherent_dm in ascending order along with the corresponding lists to guarantee consistent ordering
             def combined = []
@@ -201,7 +400,8 @@ workflow {
                 filstr       : sorted_filstr_list.join(" "),
                 segment_pepoch : segment_pepoch[0],
                 dm_start    : sorted_dm_start_list.join(" "),
-                dm_end      : sorted_dm_end_list.join(" ")
+                dm_end      : sorted_dm_end_list.join(" "),
+                stage_dirs  : stage_dirs
             ]
             
         }
@@ -212,7 +412,7 @@ workflow {
         candy_picker_output = candy_picker(candy_picker_input)
 
 
-        candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch, dm_start, dm_end ->
+        candy_picker_mapped = candy_picker_output.map { output_dp, output_dp_id, publish_dir, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, segment_pepoch, dm_start, dm_end, stage_dirs ->
 
             return [
                     output_dp      : output_dp,
@@ -226,7 +426,8 @@ workflow {
                     beam_id        : beam_id,
                     filstr         : filstr,
                     dm_start       : dm_start,
-                    dm_end         : dm_end
+                    dm_end         : dm_end,
+                    stage_dirs     : stage_dirs
                 ]
                 
         }
@@ -287,7 +488,8 @@ workflow {
                         beam_id        : record.beam_id,
                         filstr         : filstrs[i],
                         dm_start       : dmStarts[i],
-                        dm_end         : dmEnds[i]
+                        dm_end         : dmEnds[i],
+                        stage_dirs     : record.stage_dirs
                     ]
                 
             }
@@ -324,13 +526,14 @@ workflow {
                 cfg_name         : candy_picker_map.cfg_name,
                 filstr           : candy_picker_map.filstr,
                 dm_start         : candy_picker_map.dm_start,
-                dm_end           : candy_picker_map.dm_end
+                dm_end           : candy_picker_map.dm_end,
+                stage_dirs       : candy_picker_map.stage_dirs
             ]
         }
     }
     else {
 
-        peasoup_mapped = peasoup_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end ->
+        peasoup_mapped = search_output.map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end, stage_dirs ->
         [
             segment_pepoch.toString(),
             [
@@ -345,7 +548,8 @@ workflow {
                 beam_id        : beam_id,
                 filstr         : filstr,
                 dm_start       : dm_start,
-                dm_end         : dm_end
+                dm_end         : dm_end,
+                stage_dirs     : stage_dirs
             ]
         ]
     }
@@ -368,7 +572,8 @@ workflow {
             cfg_name         : peasoup_map.cfg_name,
             filstr           : peasoup_map.filstr,
             dm_start         : peasoup_map.dm_start,
-            dm_end           : peasoup_map.dm_end
+            dm_end           : peasoup_map.dm_end,
+            stage_dirs       : peasoup_map.stage_dirs
         ]
     }
 
@@ -378,7 +583,7 @@ workflow {
 
     if (params.candidate_filter.ml_candidate_scoring.enable == 1){
 
-        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end ->
+        pics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end, stage_dirs ->
             [
                 program_name    : "pics",
                 pipeline_id     : params.pipeline_id,
@@ -396,7 +601,8 @@ workflow {
                 filstr : filstr,
                 archive_source_dir : publish_dir,
                 dm_start : dm_start,
-                dm_end : dm_end
+                dm_end : dm_end,
+                stage_dirs : stage_dirs
             ]
             
         }
@@ -405,7 +611,7 @@ workflow {
      }
     if (params.candidate_filter.calculate_post_folding_heuristics.enable == 1){
 
-        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end ->
+        calculate_post_folding_heuristics_input = pulsarx_output.map { archives, pngs, cands, csvs, search_fold_merged_path, pulsarx_batch_name, output_dp, output_dp_id, publish_dir, pulsarx_cands_file, fold_candidate_id, search_fold_merged_val, target_name, beam_id, utc_start, cfg_name, filstr, dm_start, dm_end, stage_dirs ->
             [
                 program_name    : "post_folding_heuristics",
                 pipeline_id     : params.pipeline_id,
@@ -423,7 +629,8 @@ workflow {
                 filstr : filstr,
                 archive_source_dir : publish_dir,
                 dm_start : dm_start,
-                dm_end : dm_end
+                dm_end : dm_end,
+                stage_dirs : stage_dirs
             ]
             
         }

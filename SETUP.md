@@ -108,6 +108,68 @@ peasoup = '[
 
 Ensure that each configuration gets a unique `cfg_name`.
 
+### Hierarchical template bank search
+
+A circular-orbit template bank search can be run in two stages. Stage 1 is the normal peasoup
+template bank search configured above (typically a coarse bank split into chunks, one peasoup
+entry per chunk). With `hierarchical_search.enable = 1` the pipeline then, for every filterbank
+and search segment:
+
+1. groups the stage-1 `output.xml` files (all template bank chunks and, if `merge_dm_ranges = 1`,
+   all incoherent DM ranges of the filterbank),
+2. maps every candidate to Legendre-coefficient space and keeps only the S/N peaks
+   (`scripts/hierarchical_search.py cluster`); a peak that rises less than `min_prominence`
+   (in S/N) above the saddle towards a brighter touching cluster is absorbed into that cluster,
+   so a bright pulsar does not spawn one fine grid per noise bump on its slope,
+3. builds a fine template bank around every peak (a lattice in the eigen-basis of the orbital
+   metric) and writes it as peasoup chunk files,
+4. runs peasoup again with every chunk (stage 2) on the same filterbank, reusing the stage-1
+   arguments (`hierarchical_search.peasoup_overrides` replaces individual keys, e.g. `dm_step`
+   or `total_cands_limit`); the DM range is the union of the stage-1 ranges of the group,
+5. merges the stage-2 chunk results into a single XML file, clustered again if
+   `cluster_stage2 = 1`, which is then folded like any other peasoup result.
+
+```groovy
+hierarchical_search {
+    enable = 1
+    stage1_cfg_regex = "30m/ck02/tb_ck.*"   // which stage-1 runs take part (null = all)
+    merge_dm_ranges = 1
+    nominal_mismatch = 0.15
+    distance_tol = 50
+    min_prominence = 2
+    search_halfrange_fac = 0.6
+    search_stepsize_fac = 0.2
+    period_min = 0.0025
+    templates_per_chunk = 1000000
+    max_templates = 5000000               // cap the stage-2 bank, brightest peaks first
+    peasoup_overrides = [dm_step: 0.1, total_cands_limit: 10000]
+    merge_stage2 = 1
+    cluster_stage2 = 1
+}
+```
+
+When the hierarchical search is enabled nothing is published to `05_SEARCH`, `09_FOLD_FIL` or
+`10_FOLD_FIL_FILTER`: both stages go to the hierarchical trees (`search_publish_dir`, `fold_publish_dir`
+and `filter_publish_dir`, by default `11_`, `12_` and `13_HIERARCHICAL_SEARCH`), with the usual layout:
+
+```
+11_HIERARCHICAL_SEARCH/<target>/<utc>/<filstr>/<pipeline_name>/
+    <dm_start>_<dm_end>/<cfg_name>/output.xml                 # stage-1 peasoup results (one per DM range and chunk)
+    <dm_start>_<dm_end>/<stage-1 cfg dir>/<cfg_suffix>/       # stage 2, DM range = union of the stage-1 ranges
+        clustered_peaks.csv, hierarchical_summary.json        # clustering summary
+        template_bank/fine_tb_ck*.txt                         # only if publish_template_bank = 1
+        ck000/output.xml, ck001/output.xml, ...               # stage-2 peasoup results per chunk
+        merged/output.xml                                     # merged (and clustered) result that is folded
+12_HIERARCHICAL_SEARCH/.../<stage-1 cfg dir>/<cfg_suffix>/merged/<fold group>/   # PulsarX folds
+13_HIERARCHICAL_SEARCH/.../<stage-1 cfg dir>/<cfg_suffix>/merged/<fold group>/   # PICS and post-folding heuristics
+```
+
+The DM range directory is the union of the stage-1 ranges when `merge_dm_ranges = 1`.
+
+The clustering and merging steps run inside the PulsarX container (they need numpy and scipy only).
+Set `search_only = true` to stop after stage 2 without folding, and
+`fold_stage1_candidates = 1` to fold the stage-1 candidates as well.
+
 ---
 
 ## Step 5: Folding Configuration

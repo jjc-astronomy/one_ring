@@ -32,6 +32,7 @@ All software components run inside containerized environments managed by [Apptai
 * Fault-tolerant architecture: processing continues if Kafka or DB is temporarily down.
 * Fully containerized execution: no local Python or search tools required.
 * Modular configuration per cluster using `configs/`.
+* Optional hierarchical (two-stage) template bank search: stage-1 candidates are clustered and re-searched with a fine template bank around every S/N peak (see [SETUP.md](SETUP.md#hierarchical-template-bank-search)).
 * Safe resume support using `--resume`.
 
 ---
