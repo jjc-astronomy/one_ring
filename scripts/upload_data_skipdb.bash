@@ -80,7 +80,7 @@ declare -A SINGULARITY_IMAGE_PATHS
 declare -A MOUNTS
 declare -A HOSTNAME_PREFIXES
 
-SINGULARITY_IMAGE_PATHS["contra"]="/b/u/vishnu/SINGULARITY_IMAGES"
+SINGULARITY_IMAGE_PATHS["contra"]="/b/u/jjiang/singularity_images"
 MOUNTS["contra"]="-B /homes -B /b -B /bscratch"
 HOSTNAME_PREFIXES["contra"]="csched"
 

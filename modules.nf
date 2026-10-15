@@ -107,8 +107,13 @@ process peasoup {
           val(target_name)
     
     output:
-    tuple path(output_dp), env(output_dp_id), env(publish_dir), env(segment_pepoch), val(beam_name), val(coherent_dm), env(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(program_args.dm_start), val(program_args.dm_end)
-    publishDir "${params.publish_dir_prefix}/${program_args.search_dir ?: '05_SEARCH'}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.dm_start}_${program_args.dm_end}/${program_args.cfg_name}/", mode: 'copy'
+    tuple path(output_dp), env(output_dp_id), env(publish_dir), env(segment_pepoch), val(beam_name), val(coherent_dm), env(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(program_args.dm_start), val(program_args.dm_end), emit: results
+    // Dedispersed time series dumped by peasoup (-d), one .dat/.inf pair per DM trial; only when
+    // program_args.dump_timeseries == 1 (the hierarchical search sets it for the first bank chunk of every DM range).
+    tuple val(filstr), val(utc_start), val(beam_id), val(program_args), path("timeseries/*"), optional: true, emit: timeseries
+
+    publishDir "${params.publish_dir_prefix}/${program_args.search_dir ?: '05_SEARCH'}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.dm_start}_${program_args.dm_end}/${program_args.cfg_name}/", pattern: "${output_dp}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/${program_args.search_dir ?: '05_SEARCH'}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.timeseries_publish_dir ?: (program_args.dm_start + '_' + program_args.dm_end + '/' + program_args.cfg_name)}/", pattern: "timeseries/*", saveAs: { fn -> fn.toString().replaceFirst('^timeseries/', '') }, mode: 'copy'
 
     script:
     // Stage directory of the published results: the default search tree unless the search configuration
@@ -194,6 +199,10 @@ process peasoup {
 
     if [ "${program_args.extra_args}" != "null" ]; then
         optional_args="\${optional_args} ${program_args.extra_args}"
+    fi
+    if [ "${program_args.dump_timeseries}" == "1" ]; then
+        # dump the dedispersed time series of every DM trial (PRESTO-style .dat + .inf) before searching
+        optional_args="\${optional_args} -d timeseries"
     fi
     output_dir="peasoup_results"
     mkdir -p \${output_dir}
@@ -590,15 +599,32 @@ process generate_fine_template_bank {
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/", pattern: "{clustered_peaks.csv,hierarchical_summary.json}", mode: 'copy'
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/template_bank/", pattern: "fine_tb_ck*.txt", mode: 'copy', enabled: params.hierarchical_search.publish_template_bank == 1 ? true : false
 
+    // program_name .. input_dp_id are named so that the database watchdog (nf-live-tracking events) can record
+    // the task, its input data products (the stage-1 XML files) and its output data products.
     input:
-    tuple val(meta), path(stage1_xmls, stageAs: 'stage1_xml_?????.xml')
+    tuple val(program_name),
+          val(pipeline_id),
+          val(hardware_id),
+          val(beam_id),
+          val(input_dp),
+          val(input_dp_id),
+          val(meta),
+          path(stage1_xmls, stageAs: 'stage1_xml_?????.xml')
 
     output:
-    tuple val(meta), path("fine_tb_ck*.txt"), path("clustered_peaks.csv"), path("hierarchical_summary.json")
+    tuple val(meta), path("clustered_peaks.csv"), path("hierarchical_summary.json"), path("stage1_reference.xml"), env(output_dp), env(output_dp_id), env(publish_dir), emit: peaks
+    // fine template bank chunks: only written when stage 2 is run with peasoup (stage2_method = "peasoup")
+    tuple val(meta), path("fine_tb_ck*.txt"), optional: true, emit: banks
 
     script:
     def hs = params.hierarchical_search
+    def publish_root = "${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}"
+    def bank_files = (hs.stage2_method ?: 'fold') == 'peasoup' ? "" : "--no_bank_files"
     def optional_args = ""
+    // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS, SPIN PERIOD)
+    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
+    if (hs.period_min != null)       optional_args += " --period_min ${hs.period_min}"
+    if (hs.clip_to_bank == 0)        optional_args += " --no_bank_clip"
     if (hs.tobs != null)    optional_args += " --tobs ${hs.tobs}"
     if (hs.min_snr != null) optional_args += " --min_snr ${hs.min_snr}"
     if (hs.max_peaks != null)     optional_args += " --max_peaks ${hs.max_peaks}"
@@ -615,14 +641,32 @@ process generate_fine_template_bank {
         -p fine_tb \\
         --order_highest ${hs.order_highest} \\
         --f0tol_fac ${hs.f0tol_fac} \\
-        --nominal_mismatch ${hs.nominal_mismatch} \\
         --distance_tol ${hs.distance_tol} \\
         --min_prominence ${hs.min_prominence} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} \\
         --search_stepsize_fac ${hs.search_stepsize_fac} \\
-        --period_min ${hs.period_min} \\
+        --lattice ${hs.lattice ?: 'linear'} \\
         --templates_per_chunk ${hs.templates_per_chunk} \\
-        --workers ${task.cpus} ${optional_args}
+        --workers ${task.cpus} ${optional_args} ${bank_files}
+
+    # one stage-1 XML as header template for the fold search output
+    cp -L stage1_xml_00001.xml stage1_reference.xml
+
+    # Data products for the database: the clustering summary (and the template bank chunks if they are published),
+    # one publish directory per file.
+    output_dp="clustered_peaks.csv hierarchical_summary.json"
+    publish_dir="${publish_root}/ ${publish_root}/"
+    if [ "${hs.publish_template_bank}" == "1" ] && ls fine_tb_ck*.txt > /dev/null 2>&1; then
+        for tb in \$(ls -v fine_tb_ck*.txt); do
+            output_dp="\${output_dp} \${tb}"
+            publish_dir="\${publish_dir} ${publish_root}/template_bank/"
+        done
+    fi
+    output_dp_id=""
+    for f in \${output_dp}; do
+        output_dp_id="\${output_dp_id} \$(uuidgen)"
+    done
+    output_dp_id=\$(echo \${output_dp_id})
     """
 }
 
@@ -634,16 +678,25 @@ process merge_hierarchical_candidates {
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/merged/", pattern: "output.xml", mode: 'copy'
 
     input:
-    tuple val(meta), path(stage2_xmls, stageAs: 'stage2_xml_?????.xml')
+    tuple val(program_name),
+          val(pipeline_id),
+          val(hardware_id),
+          val(beam_id),
+          val(input_dp),
+          val(input_dp_id),
+          val(output_dp),
+          val(meta),
+          path(stage2_xmls, stageAs: 'stage2_xml_?????.xml')
 
     output:
     // Same shape as the peasoup process output so that the folding stage can consume it unchanged.
-    tuple path("output.xml"), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val("${meta.cfg_hier}/merged"), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end)
+    tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val("${meta.cfg_hier}/merged"), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end)
 
     script:
     def hs = params.hierarchical_search
     def optional_args = ""
     if (hs.cluster_stage2 == 1) optional_args += " --cluster"
+    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)        optional_args += " --tobs ${hs.tobs}"
     """
     #!/bin/bash
@@ -656,13 +709,98 @@ process merge_hierarchical_candidates {
 
     python ${hs.script} merge \\
         -i stage2_xml_*.xml \\
-        -o output.xml \\
+        -o ${output_dp} \\
         --order_highest ${hs.order_highest} \\
         --f0tol_fac ${hs.f0tol_fac} \\
-        --nominal_mismatch ${hs.nominal_mismatch} \\
         --distance_tol ${hs.distance_tol} \\
         --min_prominence ${hs.min_prominence} \\
         --workers ${task.cpus} ${optional_args}
+
+    output_dp_id=\$(uuidgen)
+    """
+}
+
+process hierarchical_fold_search {
+    label 'hierarchical_fold'
+    // peasoup image: CUDA + nvcc for the resampler, python with numpy for the fold search
+    container "${params.apptainer_images.peasoup}"
+    tag "${meta.filstr} ${cfg_name} ${meta.dm_start}_${meta.dm_end}"
+
+    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "${output_dp}", mode: 'copy'
+
+    input:
+    tuple val(program_name),
+          val(pipeline_id),
+          val(hardware_id),
+          val(beam_id),
+          val(input_dp),
+          val(input_dp_id),
+          val(output_dp),
+          val(meta),
+          val(cfg_name),
+          val(chunk),
+          val(nchunks),
+          path(peaks_csv),
+          path(reference_xml),
+          path(timeseries, stageAs: 'ts_?????/*')   // one directory per file: DM trials of adjacent ranges may share a name
+
+    output:
+    // Same shape as the peasoup process output so that the merge and folding stages consume it unchanged.
+    tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val(cfg_name), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end)
+
+    script:
+    def hs = params.hierarchical_search
+    def fd = hs.fold
+    def optional_args = ""
+    // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS, SPIN PERIOD)
+    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
+    if (hs.period_min != null)       optional_args += " --period_min ${hs.period_min}"
+    if (hs.clip_to_bank == 0)        optional_args += " --no_bank_clip"
+    if (hs.tobs != null) optional_args += " --tobs ${hs.tobs}"
+    if (fd.use_resampler == 1) optional_args += " --resampler ./resample_timeseries --resampler_mode ${fd.resampler_mode ?: 'nearest'}"
+    if (fd.use_resampler == 1 && (fd.method ?: 'gpu_fold') == 'gpu_fold') optional_args += " --gpu_fold"
+    def script_dir = new File(hs.script.toString()).getParent()
+    """
+    #!/bin/bash
+    set -euo pipefail
+
+    publish_dir="${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/"
+
+    if [ "${fd.use_resampler}" == "1" ]; then
+        # resampler with peasoup's GPU kernels: prebuilt binary if present, otherwise built here with nvcc
+        if [ -x "${fd.resampler_binary}" ]; then
+            cp "${fd.resampler_binary}" ./resample_timeseries
+        else
+            bash ${script_dir}/build_resample_timeseries.sh ./resample_timeseries
+        fi
+    fi
+
+    # Re-pair every .dat with its .inf (staged in separate directories) under unique names
+    mkdir -p series
+    i=0
+    for dat in \$(ls -v ts_*/*.dat); do
+        stem=\$(basename "\${dat%.dat}")
+        inf=\$(ls ts_*/"\${stem}.inf" | head -1)
+        i=\$((i + 1))
+        cp -L "\${dat}" "series/\$(printf %03d \${i})_\${stem}.dat"
+        cp -L "\${inf}" "series/\$(printf %03d \${i})_\${stem}.inf"
+    done
+    echo "Stage-2 fold search, peaks chunk ${chunk} of ${nchunks}, time series:"
+    ls -v series/*.dat
+
+    python ${hs.script} foldsearch \\
+        --peaks ${peaks_csv} \\
+        --timeseries series/*.dat \\
+        --reference_xml ${reference_xml} \\
+        --chunk ${chunk} --nchunks ${nchunks} --only_used \\
+        --nsub ${fd.nsub} --max_phase_drift_bins ${fd.max_phase_drift_bins} --nsub_max ${fd.nsub_max} \\
+        --nbins ${fd.nbins} --ducy_max ${fd.ducy_max} \\
+        --f0_halfrange_bins ${fd.f0_halfrange_bins} --f0_step_bins ${fd.f0_step_bins} \\
+        --dm_trials ${fd.dm_trials} \\
+        --order_highest ${hs.order_highest} \\
+        --search_halfrange_fac ${hs.search_halfrange_fac} --search_stepsize_fac ${hs.search_stepsize_fac} \\
+        --lattice ${hs.lattice ?: 'linear'} \\
+        -o ${output_dp} ${optional_args}
 
     output_dp_id=\$(uuidgen)
     """

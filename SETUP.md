@@ -121,25 +121,51 @@ and search segment:
    (`scripts/hierarchical_search.py cluster`); a peak that rises less than `min_prominence`
    (in S/N) above the saddle towards a brighter touching cluster is absorbed into that cluster,
    so a bright pulsar does not spawn one fine grid per noise bump on its slope,
-3. builds a fine template bank around every peak (a lattice in the eigen-basis of the orbital
-   metric) and writes it as peasoup chunk files,
-4. runs peasoup again with every chunk (stage 2) on the same filterbank, reusing the stage-1
-   arguments (`hierarchical_search.peasoup_overrides` replaces individual keys, e.g. `dm_step`
-   or `total_cands_limit`); the DM range is the union of the stage-1 ranges of the group,
+3. builds a fine template bank around every peak and writes it as peasoup chunk files. With
+   `lattice = "linear"` this is a lattice in the eigen-basis of the orbital metric evaluated at the
+   peak; with `lattice = "adaptive"` an advancing front grows the grid layer by layer, re-evaluating
+   the metric at every step and measuring all distances in Legendre-coefficient space, followed by a
+   gap-filling pass that guarantees the covering mismatch. The adaptive lattice is only worth its
+   extra cost for large `search_halfrange_fac`, where the metric changes across the region,
+4. searches the fine grid (stage 2). With `stage2_method = "fold"` (default) the dedispersed time
+   series dumped by the first stage-1 chunk of every DM range (`dump_timeseries`) are searched with
+   `scripts/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels (built with
+   `scripts/build_resample_timeseries.sh` inside the peasoup container, or on the fly in the job).
+   With `fold.method = "gpu_fold"` (default) every fine-lattice template is resampled into its own
+   emission frame and folded on the device in one pass, at its Doppler-corrected frequency
+   (f_obs minus the linear term of the template relative to the peak), into `fold.nsub`
+   sub-integrations; the small grid of frequency offsets (`fold.f0_halfrange_bins`,
+   `fold.f0_step_bins`) is then searched on the device too, by whole-bin shifts of the
+   sub-integrations, and scored with pyloki's boxcar matched filter, so that only the best
+   (S/N, width, offset) per template is returned to the host. Nearest-neighbour resampling
+   (`fold.resampler_mode`) keeps the noise of neighbouring bins independent; interpolating
+   resamplers bias the boxcar S/N when the profile has more bins than samples per period.
+   With `fold.method = "rotate"` only the peak template is resampled and the lattice is
+   searched by rotating the sub-integration profiles, which is approximate for far templates and
+   needs the automatic `nsub`. The peaks are split into jobs of `fold.peaks_per_job`, run on GPU
+   nodes in the peasoup container. With `stage2_method =
+   "peasoup"` peasoup runs again with every fine template bank chunk on the same filterbank,
+   reusing the stage-1 arguments (`peasoup_overrides` replaces individual keys); the DM range is
+   the union of the stage-1 ranges of the group,
 5. merges the stage-2 chunk results into a single XML file, clustered again if
-   `cluster_stage2 = 1`, which is then folded like any other peasoup result.
+   `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
+   for this fold come from `hierarchical_search.folding_configuration` (same syntax as
+   `folding.configuration`), because the stage-2 `snr` is the fold S/N of the aligned profile, not
+   the FFT S/N of stage 1.
 
 ```groovy
 hierarchical_search {
     enable = 1
     stage1_cfg_regex = "30m/ck02/tb_ck.*"   // which stage-1 runs take part (null = all)
     merge_dm_ranges = 1
-    nominal_mismatch = 0.15
+    nominal_mismatch = null               // null: MISMATCH of the stage-1 template bank header
+    tobs = null                           // null: TOBS of the bank header (else the segment length)
+    period_min = null                     // null: SPIN PERIOD of the bank header
+    clip_to_bank = 1                      // drop fine-grid templates outside the bank's PORB / mass region
     distance_tol = 50
     min_prominence = 2
     search_halfrange_fac = 0.6
     search_stepsize_fac = 0.2
-    period_min = 0.0025
     templates_per_chunk = 1000000
     max_templates = 5000000               // cap the stage-2 bank, brightest peaks first
     peasoup_overrides = [dm_step: 0.1, total_cands_limit: 10000]
@@ -148,6 +174,14 @@ hierarchical_search {
 }
 ```
 
+The parameters that define the fine grid are not hard-coded: `nominal_mismatch`, `tobs` and
+`period_min` default to the `# MISMATCH`, `# TOBS (h)` and `# SPIN PERIOD (ms)` values in the header of
+the stage-1 template bank, found through `search_parameters/template_bank_file` of the stage-1 XML
+(the same file is used by the stage-2 merge). Setting them in the config overrides the bank. With
+`clip_to_bank = 1` the fine lattice is also cut to the physical region of the bank (`PORB MIN/MAX`
+and the `asini/c` limit from the mass limits), so no time is spent on orbits the bank was not
+designed for; a peak whose whole lattice falls outside keeps its stage-1 orbit.
+
 When the hierarchical search is enabled nothing is published to `05_SEARCH`, `09_FOLD_FIL` or
 `10_FOLD_FIL_FILTER`: both stages go to the hierarchical trees (`search_publish_dir`, `fold_publish_dir`
 and `filter_publish_dir`, by default `11_`, `12_` and `13_HIERARCHICAL_SEARCH`), with the usual layout:
@@ -155,10 +189,12 @@ and `filter_publish_dir`, by default `11_`, `12_` and `13_HIERARCHICAL_SEARCH`),
 ```
 11_HIERARCHICAL_SEARCH/<target>/<utc>/<filstr>/<pipeline_name>/
     <dm_start>_<dm_end>/<cfg_name>/output.xml                 # stage-1 peasoup results (one per DM range and chunk)
+    <dm_start>_<dm_end>/<stage-1 cfg dir>/timeseries/*.dat,*.inf   # dedispersed time series per DM trial (dump_timeseries = 1)
     <dm_start>_<dm_end>/<stage-1 cfg dir>/<cfg_suffix>/       # stage 2, DM range = union of the stage-1 ranges
         clustered_peaks.csv, hierarchical_summary.json        # clustering summary
         template_bank/fine_tb_ck*.txt                         # only if publish_template_bank = 1
-        ck000/output.xml, ck001/output.xml, ...               # stage-2 peasoup results per chunk
+        fold_ck000/output.xml, ...                            # stage-2 fold-search results per job (stage2_method = "fold")
+        ck000/output.xml, ck001/output.xml, ...               # stage-2 peasoup results per chunk (stage2_method = "peasoup")
         merged/output.xml                                     # merged (and clustered) result that is folded
 12_HIERARCHICAL_SEARCH/.../<stage-1 cfg dir>/<cfg_suffix>/merged/<fold group>/   # PulsarX folds
 13_HIERARCHICAL_SEARCH/.../<stage-1 cfg dir>/<cfg_suffix>/merged/<fold group>/   # PICS and post-folding heuristics
