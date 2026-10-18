@@ -599,7 +599,6 @@ process generate_fine_template_bank {
     tag "${meta.filstr} ${meta.cfg_hier} ${meta.dm_start}_${meta.dm_end}"
 
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/", pattern: "{clustered_peaks.csv,hierarchical_summary.json}", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/template_bank/", pattern: "fine_tb_ck*.txt", mode: 'copy', enabled: params.hierarchical_search.publish_template_bank == 1 ? true : false
 
     // program_name .. input_dp_id are named so that the database watchdog (nf-live-tracking events) can record
     // the task, its input data products (the stage-1 XML files) and its output data products.
@@ -615,13 +614,10 @@ process generate_fine_template_bank {
 
     output:
     tuple val(meta), path("clustered_peaks.csv"), path("hierarchical_summary.json"), path("stage1_reference.xml"), env(output_dp), env(output_dp_id), env(publish_dir), emit: peaks
-    // fine template bank chunks: only written when stage 2 is run with peasoup (stage2_method = "peasoup")
-    tuple val(meta), path("fine_tb_ck*.txt"), optional: true, emit: banks
 
     script:
     def hs = params.hierarchical_search
     def publish_root = "${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}"
-    def bank_files = (hs.stage2_method ?: 'fold') == 'peasoup' ? "" : "--no_bank_files"
     def optional_args = ""
     // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS, SPIN PERIOD)
     if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
@@ -640,7 +636,6 @@ process generate_fine_template_bank {
 
     python ${hs.script} cluster \\
         -i stage1_xml_*.xml \\
-        -p fine_tb \\
         --order_highest ${hs.order_highest} \\
         --f0tol_fac ${hs.f0tol_fac} \\
         --distance_tol ${hs.distance_tol} \\
@@ -648,22 +643,14 @@ process generate_fine_template_bank {
         --search_halfrange_fac ${hs.search_halfrange_fac} \\
         --search_stepsize_fac ${hs.search_stepsize_fac} \\
         --lattice ${hs.lattice ?: 'linear'} \\
-        --templates_per_chunk ${hs.templates_per_chunk} \\
-        --workers ${task.cpus} ${optional_args} ${bank_files}
+        --workers ${task.cpus} ${optional_args}
 
     # one stage-1 XML as header template for the fold search output
     cp -L stage1_xml_00001.xml stage1_reference.xml
 
-    # Data products for the database: the clustering summary (and the template bank chunks if they are published),
-    # one publish directory per file.
+    # Data products for the database: the clustering summary, one publish directory per file.
     output_dp="clustered_peaks.csv hierarchical_summary.json"
     publish_dir="${publish_root}/ ${publish_root}/"
-    if [ "${hs.publish_template_bank}" == "1" ] && ls fine_tb_ck*.txt > /dev/null 2>&1; then
-        for tb in \$(ls -v fine_tb_ck*.txt); do
-            output_dp="\${output_dp} \${tb}"
-            publish_dir="\${publish_dir} ${publish_root}/template_bank/"
-        done
-    fi
     output_dp_id=""
     for f in \${output_dp}; do
         output_dp_id="\${output_dp_id} \$(uuidgen)"

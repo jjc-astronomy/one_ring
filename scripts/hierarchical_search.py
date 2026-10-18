@@ -548,19 +548,6 @@ def advancing_front_lattice(centers, metric_fn, an_fn, halfrange, stepsize, batc
     return templates, owner
 
 
-def write_template_bank(templates, path, tobs):
-    with open(path, 'w') as f:
-        f.write('# TEMPLATE BANK TECHNIQUE: GRID\n')
-        f.write('# TOBS (h): %f\n' % (tobs / 3600.))
-        f.write('# NTEMPLATES: %d\n' % len(templates))
-        f.write('# ANGULAR_VELOCITY (rad/s) ASINI/C (lt-s) ORB_PHASE (rad) PERIASTRON (rad) ECCENTRICITY\n')
-        np.savetxt(f, templates, fmt='%.17g %.17g %.17g')
-
-
-###############################################################################
-# Sub-commands
-###############################################################################
-
 def cmd_cluster(args):
     infos, arrays, _ = read_many(args.input)
     ncands_total = len(arrays['snr'])
@@ -639,15 +626,6 @@ def cmd_cluster(args):
                 peaks['template'][i, 0], peaks['template'][i, 1], peaks['template'][i, 2],
                 peaks['file_index'][i]))
 
-    nchunks = 0 if args.no_bank_files else max(1, int(np.ceil(len(templates) / float(args.templates_per_chunk))))
-    chunk_files = []
-    for i in range(nchunks):
-        chunk = templates[i * args.templates_per_chunk:(i + 1) * args.templates_per_chunk]
-        path = "%s_ck%03d.txt" % (args.prefix, i)
-        write_template_bank(chunk, path, tobs)
-        chunk_files.append(path)
-        logging.info("wrote %s with %d templates", path, len(chunk))
-
     summary = dict(
         input_files=[info['xml_file'] for info in infos],
         ncands_input=int(ncands_total),
@@ -657,16 +635,13 @@ def cmd_cluster(args):
         nunique_peak_templates=int(len(centers)),
         npeak_templates_used=int(center_used.sum()),
         ntemplates=int(len(templates)),
-        nchunks=nchunks,
-        chunk_files=chunk_files,
         tobs=float(tobs),
         parameters=dict(order_highest=args.order_highest, f0tol_fac=args.f0tol_fac,
                         nominal_mismatch=args.nominal_mismatch, distance_tol=args.distance_tol,
                         search_halfrange_fac=args.search_halfrange_fac,
                         search_stepsize_fac=args.search_stepsize_fac, period_min=args.period_min,
                         lattice=args.lattice, min_snr=args.min_snr, min_prominence=args.min_prominence,
-                        max_peaks=args.max_peaks, max_templates=args.max_templates,
-                        templates_per_chunk=args.templates_per_chunk),
+                        max_peaks=args.max_peaks, max_templates=args.max_templates),
     )
     with open(args.summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
@@ -1289,9 +1264,9 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    pc = sub.add_parser('cluster', help='cluster stage-1 candidates and write fine template bank chunks')
+    pc = sub.add_parser('cluster', help='cluster stage-1 candidates into S/N peaks and size the fine grid (stage 2 '
+                                            'regenerates the lattice of every peak in the fold search)')
     pc.add_argument('-i', '--input', nargs='+', required=True, help='stage-1 peasoup XML files')
-    pc.add_argument('-p', '--prefix', default='fine_tb', help='template bank chunk prefix (default fine_tb)')
     pc.add_argument('--peaks_file', default='clustered_peaks.csv')
     pc.add_argument('--summary_file', default='hierarchical_summary.json')
     add_cluster_options(pc)
@@ -1311,9 +1286,6 @@ def main():
                     help='keep at most this many peaks (the brightest) for the fine grid')
     pc.add_argument('--max_templates', type=int, default=None,
                     help='keep at most this many fine-grid templates (whole peaks, brightest first)')
-    pc.add_argument('--templates_per_chunk', type=int, default=1000000)
-    pc.add_argument('--no_bank_files', action='store_true',
-                    help='do not write the template bank chunk files (stage 2 by folding regenerates the lattice per peak)')
     pc.set_defaults(func=cmd_cluster)
 
     pm = sub.add_parser('merge', help='merge stage-2 chunk XML files into one XML file')

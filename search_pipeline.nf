@@ -2,7 +2,7 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 
 include { filtool; peasoup; candy_picker; pulsarx; pics; post_folding_heuristics } from './modules'
-include { peasoup as peasoup_hierarchical; generate_fine_template_bank; hierarchical_fold_search; merge_hierarchical_candidates } from './modules'
+include { generate_fine_template_bank; hierarchical_fold_search; merge_hierarchical_candidates } from './modules'
 
 
 workflow {
@@ -101,15 +101,14 @@ workflow {
                       [fold_config: pulsarx_fold_config, fold_group: foldGroupName]
 
     /*
-     * Time series dump for stage 2 (hierarchical_search.dump_timeseries == 1): the first bank chunk (lowest
-     * cfg_name) of every DM range and segment dumps the dedispersed time series with peasoup -d. The other
-     * chunks of the same range would dump identical files, so they do not.
+     * Time series dump for stage 2: the first bank chunk (lowest cfg_name) of every DM range and segment dumps
+     * the dedispersed time series with peasoup -d. The other chunks of the same range would dump identical
+     * files, so they do not.
      */
-    def stage2_method = hierarchical_enabled ? (params.hierarchical_search.stage2_method ?: 'fold') : null
     def segKey = { a -> [a.fft_size, a.start_sample, a.nsamples].collect { it.toString() }.join('|') }
     def dump_program_ids = [] as Set
     def dump_counts = [:]      // coherent_dm|segment -> number of dumping jobs (= DM ranges) per filterbank
-    if (hierarchical_enabled && (params.hierarchical_search.dump_timeseries == 1 || stage2_method == 'fold')) {
+    if (hierarchical_enabled) {
         def dump_regex = params.hierarchical_search.stage1_cfg_regex ?: '.*'
         peasoup_prog.findAll { p -> p.arguments.cfg_name.toString() ==~ dump_regex }
             .groupBy { p -> [p.arguments.coherent_dm, p.arguments.dm_start, p.arguments.dm_end, p.arguments.fft_size, p.arguments.start_sample, p.arguments.nsamples].collect { it.toString() }.join('|') }
@@ -166,12 +165,12 @@ workflow {
      *
      * 1. The stage-1 peasoup results of one filterbank + segment (all template bank chunks and, if
      *    merge_dm_ranges == 1, all incoherent DM ranges) are grouped together.
-     * 2. generate_fine_template_bank clusters the candidates in Legendre-coefficient space, keeps the
-     *    S/N peaks and builds a fine template bank around every peak (one or more chunk files).
-     * 3. peasoup runs again on the same filterbank with every fine template bank chunk (stage 2).
-     *    The stage-1 search arguments are reused; keys in params.hierarchical_search.peasoup_overrides
-     *    replace them. The DM range is the union of the stage-1 DM ranges of the group.
-     * 4. Optionally (merge_stage2 == 1) the stage-2 chunk results are merged into a single XML file
+     * 2. generate_fine_template_bank clusters the candidates in Legendre-coefficient space and keeps the
+     *    S/N peaks (clustered_peaks.csv); the fine lattice around every peak is regenerated in stage 2.
+     * 3. hierarchical_fold_search (stage 2): the dedispersed time series dumped by stage 1 are resampled
+     *    and folded on the GPU for every fine-lattice template of every peak (hs.fold.peaks_per_job peaks
+     *    per job). The DM range of a group is the union of the stage-1 DM ranges.
+     * 4. Optionally (merge_stage2 == 1) the stage-2 job results are merged into a single XML file
      *    (clustered again if cluster_stage2 == 1), which is what gets folded.
      *
      * Everything downstream (candy_picker, pulsarx, pics, ...) consumes 'search_output'. Every record of
@@ -263,112 +262,58 @@ workflow {
 
         generate_fine_template_bank(hierarchical_groups)
         fine_peaks = generate_fine_template_bank.out.peaks
-        fine_banks = generate_fine_template_bank.out.banks
 
-        // Join the filterbank of the group back in (same utc, beam and filstr as the filtool output)
-        filtool_by_filstr = filtool_mapped.map { coherent_dm, filtool_map ->
-            tuple([filtool_map.tstart_utc, filtool_map.beam_id, filtool_map.filstr].join('|'), filtool_map)
-        }
+        /*
+         * Stage 2 by folding (LOKI scheme): the dumped time series of the group's DM trials are folded with
+         * the peak's orbit into sub-integrations, which are then aligned per fine-lattice template.
+         * The peaks of a group are split into jobs of hs.fold.peaks_per_job peaks.
+         */
+        def peaks_per_job = (hs.fold?.peaks_per_job ?: 100) as int
 
-        if (stage2_method == 'peasoup') {
-            // One stage-2 peasoup run per fine template bank chunk
-            stage2_input = fine_banks
-                .map { meta, template_banks ->
-                    tuple([meta.utc_start, meta.beam_id, meta.filstr].join('|'), meta, template_banks)
-                }
-                .combine(filtool_by_filstr, by: 0)
-                .flatMap { join_key, meta, template_banks, filtool_map ->
-                    def tb_list = template_banks instanceof List ? template_banks : [template_banks]
-                    def overrides = hs.peasoup_overrides ?: [:]
-                    tb_list.collect { tb ->
-                        def chunk = tb.getBaseName() - 'fine_tb_'
-                        def program_args = meta.stage1_program_args + overrides + [
-                            dm_start                : meta.dm_start,
-                            dm_end                  : meta.dm_end,
-                            keplerian_template_bank : tb.toString(),
-                            cfg_name                : "${meta.cfg_hier}/${chunk}".toString(),
-                            search_dir              : stage2_dirs.search_dir
-                        ]
-                        [
-                            program_name     : peasoup_prog.program_name[0],
-                            pipeline_id      : params.pipeline_id,
-                            hardware_id      : filtool_prog.data_products[0].hardware_id,
-                            program_args     : program_args,
-                            program_id       : meta.stage1_program_id,
-                            input_dp         : filtool_map.output_dp,
-                            input_dp_id      : filtool_map.output_dp_id,
-                            filstr           : filtool_map.filstr,
-                            utc_start        : filtool_map.tstart_utc,
-                            beam_name        : filtool_map.beam_name,
-                            beam_id          : filtool_map.beam_id,
-                            coherent_dm      : meta.coherent_dm,
-                            peasoup_orig_xml : "peasoup_results/overview.xml",
-                            output_dp        : "output.xml",
-                            target_name      : meta.target_name
-                        ]
-                    }
-                }
-            peasoup_hierarchical(stage2_input)
-            stage2_output = peasoup_hierarchical.out.results
-            // number of chunks per group, for the merge
-            stage2_nchunks = fine_banks.map { meta, template_banks ->
-                def n = template_banks instanceof List ? template_banks.size() : 1
-                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), n)
+        // time series of one filterbank + segment: all its DM ranges (one dumping job each)
+        timeseries_groups = peasoup.out.timeseries
+            .map { filstr, utc_start, beam_id, args, files ->
+                def key = [utc_start, beam_id, filstr, segKey(args)].join('|')
+                def n = dump_counts["${args.coherent_dm}|${segKey(args)}".toString()] ?: 1
+                tuple(groupKey(key, n), files instanceof List ? files : [files])
             }
-        }
-        else {
-            /*
-             * Stage 2 by folding (LOKI scheme): the dumped time series of the group's DM trials are folded with
-             * the peak's orbit into sub-integrations, which are then aligned per fine-lattice template.
-             * The peaks of a group are split into jobs of hs.fold.peaks_per_job peaks.
-             */
-            def peaks_per_job = (hs.fold?.peaks_per_job ?: 100) as int
+            .groupTuple(by: 0)
+            .map { key, lists -> tuple(key.toString(), lists.flatten()) }
 
-            // time series of one filterbank + segment: all its DM ranges (one dumping job each)
-            timeseries_groups = peasoup.out.timeseries
-                .map { filstr, utc_start, beam_id, args, files ->
-                    def key = [utc_start, beam_id, filstr, segKey(args)].join('|')
-                    def n = dump_counts["${args.coherent_dm}|${segKey(args)}".toString()] ?: 1
-                    tuple(groupKey(key, n), files instanceof List ? files : [files])
-                }
-                .groupTuple(by: 0)
-                .map { key, lists -> tuple(key.toString(), lists.flatten()) }
-
-            fold_jobs = fine_peaks
-                .flatMap { meta, peaks_csv, summary_json, reference_xml, output_dp, output_dp_id, publish_dir ->
-                    def summary = new groovy.json.JsonSlurper().parse(summary_json.toFile())
-                    def npeaks = (summary.npeaks ?: 0) as int
-                    def nchunks = Math.max(1, (int) Math.ceil(npeaks / (double) peaks_per_job))
-                    def key = [meta.utc_start, meta.beam_id, meta.filstr, segKey(meta.stage1_program_args)].join('|')
-                    (0..<nchunks).collect { chunk -> tuple(key, meta, peaks_csv, reference_xml, chunk, nchunks, output_dp_id) }
-                }
-            stage2_input = fold_jobs
-                .combine(timeseries_groups, by: 0)
-                .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id, ts_files ->
-                    [
-                        program_name : 'hierarchical_fold_search',
-                        pipeline_id  : params.pipeline_id,
-                        hardware_id  : filtool_prog.data_products[0].hardware_id,
-                        beam_id      : meta.beam_id,
-                        input_dp     : ([peaks_csv] + ts_files).collect { it.toString() }.join(' '),
-                        input_dp_id  : peaks_dp_id.toString().split(/\s+/)[0],
-                        output_dp    : 'output.xml',
-                        meta         : meta,
-                        cfg_name     : "${meta.cfg_hier}/fold_ck${String.format('%03d', chunk)}".toString(),
-                        chunk        : chunk,
-                        nchunks      : nchunks,
-                        peaks_csv    : peaks_csv,
-                        reference_xml: reference_xml,
-                        timeseries   : ts_files
-                    ]
-                }
-            stage2_output = hierarchical_fold_search(stage2_input)
-            stage2_nchunks = fold_jobs
-                .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id ->
-                    tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), nchunks)
-                }
-                .unique()
-        }
+        fold_jobs = fine_peaks
+            .flatMap { meta, peaks_csv, summary_json, reference_xml, output_dp, output_dp_id, publish_dir ->
+                def summary = new groovy.json.JsonSlurper().parse(summary_json.toFile())
+                def npeaks = (summary.npeaks ?: 0) as int
+                def nchunks = Math.max(1, (int) Math.ceil(npeaks / (double) peaks_per_job))
+                def key = [meta.utc_start, meta.beam_id, meta.filstr, segKey(meta.stage1_program_args)].join('|')
+                (0..<nchunks).collect { chunk -> tuple(key, meta, peaks_csv, reference_xml, chunk, nchunks, output_dp_id) }
+            }
+        stage2_input = fold_jobs
+            .combine(timeseries_groups, by: 0)
+            .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id, ts_files ->
+                [
+                    program_name : 'hierarchical_fold_search',
+                    pipeline_id  : params.pipeline_id,
+                    hardware_id  : filtool_prog.data_products[0].hardware_id,
+                    beam_id      : meta.beam_id,
+                    input_dp     : ([peaks_csv] + ts_files).collect { it.toString() }.join(' '),
+                    input_dp_id  : peaks_dp_id.toString().split(/\s+/)[0],
+                    output_dp    : 'output.xml',
+                    meta         : meta,
+                    cfg_name     : "${meta.cfg_hier}/fold_ck${String.format('%03d', chunk)}".toString(),
+                    chunk        : chunk,
+                    nchunks      : nchunks,
+                    peaks_csv    : peaks_csv,
+                    reference_xml: reference_xml,
+                    timeseries   : ts_files
+                ]
+            }
+        stage2_output = hierarchical_fold_search(stage2_input)
+        stage2_nchunks = fold_jobs
+            .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id ->
+                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), nchunks)
+            }
+            .unique()
 
         if (hs.merge_stage2 == 1) {
             // stage2_nchunks: number of stage-2 jobs per group, so that the merge starts as soon as all are done
