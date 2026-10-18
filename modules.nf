@@ -135,8 +135,10 @@ process peasoup {
     publish_dir="${params.publish_dir_prefix}/${search_dir}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${program_args.dm_start}_${program_args.dm_end}/${program_args.cfg_name}/"
 
 
-    # Write out dm_file.txt
-    python -c "import numpy as np; dm_trials = np.arange(${program_args.dm_start}, ${program_args.dm_end}, ${program_args.dm_step}); f=open('dm_file.txt','w'); f.writelines(f'{dm}\\n' for dm in dm_trials); f.close()"
+    # Write out dm_file.txt: trials dm_start + k * dm_step for all k with dm_start + k * dm_step < dm_end. The count is
+    # floor((dm_end - dm_start) / dm_step - 1e-6) + 1 rather than np.arange's ceil, so that floating-point rounding of
+    # an exact multiple (e.g. 137.2:137.3:0.05 -> 2.0000000000004547) cannot add dm_end itself as an extra trial.
+    python -c "import numpy as np; n = int(np.floor((${program_args.dm_end} - ${program_args.dm_start}) / ${program_args.dm_step} - 1e-6)) + 1; dm_trials = np.round(${program_args.dm_start} + ${program_args.dm_step} * np.arange(n), 6); f=open('dm_file.txt','w'); f.writelines(f'{dm}\\n' for dm in dm_trials); f.close()"
     check_status
     # Accumulate optional arguments
     optional_args=""

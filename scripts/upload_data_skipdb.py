@@ -422,6 +422,7 @@ class DatabaseUploader:
         peasoup_params = self._store_peasoup_configs(nextflow_cfg, docker_hash_df, df, skip_database)
         # Add each peasoup record as a separate program entry in JSON
         # peasoup_records is a list of dicts, each representing a peasoup configuration with arguments and peasoup_id
+        skip_pulsarx_ids = {}   # skip_database: one pulsarx id per distinct pepoch (segment), as the DB would give
         for peasoup_record in peasoup_params:
             peasoup_metadata = {
                 "container_image_name": peasoup_record['container_image_name'],
@@ -472,7 +473,9 @@ class DatabaseUploader:
                 "container_type": pulsarx_params['container_type']
             }
             if skip_database:
-                pulsarx_id = 255
+                # the JSON builder merges entries with the same (program_name, program_id): a fixed id would keep
+                # only the first segment's pulsarx entry, so segments (pepochs) get distinct ids here
+                pulsarx_id = skip_pulsarx_ids.setdefault(str(pulsarx_params['pepoch']), 1000 + len(skip_pulsarx_ids))
             else:
                 pulsarx_id = self._insert_pulsarx(
                     pulsarx_params,

@@ -174,6 +174,22 @@ hierarchical_search {
 }
 ```
 
+**Whitening of the stage-1 search.** Peasoup's default red-noise whitening is applied to the spectrum of the
+unresampled time series, where a binary pulsar is smeared over many Fourier bins; the running median rides up
+onto it and removes a large part of its power. Switching whitening off (`--no_deredden`) instead leaves
+thousands of sub-hertz red-noise candidates per template and makes the stage-1 jobs candidate-bound. The
+peasoup image used here (`peasoup_4f0472a.sif`, fork at
+https://github.com/vishnubk/peasoup commit 78cb72b + branch `post-resample-deredden`) adds
+`--deredden_post_resample`, which whitens the spectrum of every resampled time series instead, with wider
+running-median windows at high frequency (`--boundary_125_freq`, `--boundary_625_freq`). Put
+
+```
+"extra_args": "--deredden_post_resample --boundary_125_freq 5 --boundary_625_freq 50"
+```
+
+in every stage-1 peasoup entry. Cost: about 10 % per template trial; a binary smeared over ~900 bins keeps its
+full S/N (synthetic test: 91 vs 73 with the default whitening), and the red-noise candidates disappear.
+
 The parameters that define the fine grid are not hard-coded: `nominal_mismatch`, `tobs` and
 `period_min` default to the `# MISMATCH`, `# TOBS (h)` and `# SPIN PERIOD (ms)` values in the header of
 the stage-1 template bank, found through `search_parameters/template_bank_file` of the stage-1 XML

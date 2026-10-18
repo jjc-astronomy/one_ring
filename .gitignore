@@ -27,3 +27,4 @@ pipeline_notes.txt
 scripts/resample_timeseries
 include/template_bank/stochastic_2h_distance10.0.txt_ck*.txt
 *.hdf5
+include/template_bank/stochastic_60m_distance5.0*.txt
