@@ -157,12 +157,11 @@ and search segment:
 5. merges the stage-2 chunk results into a single XML file, clustered again if
    `cluster_stage2 = 1` and sifted by period (`sift_fdiff`: a bright pulsar is refined once per stage-1
    peak on different branches of the orbital model space, far apart in coefficient space but within the
-   bank's Doppler range in frequency; at the same DM only the brightest of such a group, including
-   harmonics p/q, is kept). The rule is tiered by the S/N of the absorbing candidate (`sift_min_snr`,
-   `sift_harm_min_snr`): only bright signals have alias families, and a faint real signal must not be
-   swallowed by a brighter noise candidate at some rational frequency ratio, so below `sift_min_snr`
-   only exact duplicates (`sift_dup_bins` at the same DM trial) are merged. The result is folded with
-   PulsarX. The S/N thresholds and candidate limit
+   bank's Doppler range in frequency; at the same DM only the brightest of such a group is kept;
+   harmonics are not merged). The rule is tiered by the S/N of the absorbing candidate
+   (`sift_min_snr`): only bright signals have alias families, and a faint real signal must not be
+   swallowed by a brighter noise candidate, so below `sift_min_snr` only exact duplicates
+   (`sift_dup_bins` at the same DM trial) are merged. The result is folded with PulsarX. The S/N thresholds and candidate limit
    for this fold come from `hierarchical_search.folding_configuration` (same syntax as
    `folding.configuration`), because the stage-2 `snr` is the fold S/N of the aligned profile, not
    the FFT S/N of stage 1.
