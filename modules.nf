@@ -642,7 +642,7 @@ process generate_fine_template_bank {
         --min_prominence ${hs.min_prominence} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} \\
         --search_stepsize_fac ${hs.search_stepsize_fac} \\
-        --lattice ${hs.lattice ?: 'linear'} \\
+        --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\
         --workers ${task.cpus} ${optional_args}
 
     # one stage-1 XML as header template for the fold search output
@@ -685,6 +685,7 @@ process merge_hierarchical_candidates {
     def hs = params.hierarchical_search
     def optional_args = ""
     if (hs.cluster_stage2 == 1) optional_args += " --cluster"
+    if ((hs.sift_fdiff ?: 0) > 0) optional_args += " --sift_fdiff ${hs.sift_fdiff} --sift_dm_tol ${hs.sift_dm_tol ?: 1.5} --sift_max_harm ${hs.sift_max_harm ?: 8}"
     if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)        optional_args += " --tobs ${hs.tobs}"
     """
@@ -712,7 +713,7 @@ process merge_hierarchical_candidates {
 process hierarchical_fold_search {
     label 'hierarchical_fold'
     // peasoup image: CUDA + nvcc for the resampler, python with numpy for the fold search
-    container "${params.apptainer_images.peasoup}"
+    container "${params.apptainer_images.hierarchical_fold ?: params.apptainer_images.peasoup}"   // CUDA for the resampler + numpy/scipy; falls back to the peasoup image
     tag "${meta.filstr} ${cfg_name} ${meta.dm_start}_${meta.dm_end}"
 
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "${output_dp}", mode: 'copy'
@@ -785,10 +786,10 @@ process hierarchical_fold_search {
         --nsub ${fd.nsub} --max_phase_drift_bins ${fd.max_phase_drift_bins} --nsub_max ${fd.nsub_max} \\
         --nbins ${fd.nbins} --ducy_max ${fd.ducy_max} \\
         --f0_halfrange_bins ${fd.f0_halfrange_bins} --f0_step_bins ${fd.f0_step_bins} \\
-        --dm_trials ${fd.dm_trials} \\
+        --dm_trials ${fd.dm_trials} --refine_iter ${fd.refine_iter == null ? 3 : fd.refine_iter} \\
         --order_highest ${hs.order_highest} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} --search_stepsize_fac ${hs.search_stepsize_fac} \\
-        --lattice ${hs.lattice ?: 'linear'} \\
+        --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\
         -o ${output_dp} ${optional_args}
 
     output_dp_id=\$(uuidgen)

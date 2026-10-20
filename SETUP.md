@@ -125,8 +125,14 @@ and search segment:
    stage 2). With `lattice = "linear"` this is a lattice in the eigen-basis of the orbital metric evaluated at the
    peak; with `lattice = "adaptive"` an advancing front grows the grid layer by layer, re-evaluating
    the metric at every step and measuring all distances in Legendre-coefficient space, followed by a
-   gap-filling pass that guarantees the covering mismatch. The adaptive lattice is only worth its
-   extra cost for large `search_halfrange_fac`, where the metric changes across the region,
+   gap-filling pass that guarantees the covering mismatch. With `lattice = "sample"` (recommended) the
+   three leading Legendre coefficients are sampled uniformly in the search ball around the peak and the
+   Keplerian parameters of every sample are solved from the stage-1 template (batched
+   Levenberg-Marquardt in log coordinates); the result is pruned in coefficient space to the step size.
+   Only this lattice reaches the other branches of the region: over one segment a tight low-mass orbit
+   and a wide long-period arc give nearly the same phase polynomial, and a metric lattice stays on the
+   branch of the stage-1 template (J1807-2459A: fold S/N 300 instead of 176, orbit recovered). It costs
+   about 0.5 s per peak (`sample_n` samples) and yields roughly 1000 templates per peak,
 4. searches the fine grid (stage 2). The dedispersed time series dumped by the first stage-1 chunk of
    every DM range are searched with
    `scripts/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels (built with
@@ -137,7 +143,11 @@ and search segment:
    sub-integrations; the small grid of frequency offsets (`fold.f0_halfrange_bins`,
    `fold.f0_step_bins`) is then searched on the device too, by whole-bin shifts of the
    sub-integrations, and scored with pyloki's boxcar matched filter, so that only the best
-   (S/N, width, offset) per template is returned to the host. Nearest-neighbour resampling
+   (S/N, width, offset) per template is returned to the host. The best (orbit, frequency) of every peak
+   is then refined iteratively (`fold.refine_iter`): parabolic steps along the eigen-directions of
+   the local metric, starting at half the grid step and halving every iteration, 7 GPU evaluations
+   per peak and iteration batched over all peaks of a DM trial, which removes most of the residual
+   phase drift left by the grid (J1807-2459A: 0.14 -> 0.02 cycles peak to peak, S/N 300 -> 325). Nearest-neighbour resampling
    (`fold.resampler_mode`) keeps the noise of neighbouring bins independent; interpolating
    resamplers bias the boxcar S/N when the profile has more bins than samples per period.
    With `fold.method = "rotate"` only the peak template is resampled and the lattice is
@@ -145,7 +155,10 @@ and search segment:
    needs the automatic `nsub`. The peaks are split into jobs of `fold.peaks_per_job`, run on GPU
    nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
 5. merges the stage-2 chunk results into a single XML file, clustered again if
-   `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
+   `cluster_stage2 = 1` and sifted by period (`sift_fdiff`: a bright pulsar is refined once per stage-1
+   peak on different branches of the orbital model space, far apart in coefficient space but within the
+   bank's Doppler range in frequency; at the same DM only the brightest of such a group, including
+   integer harmonics, is kept), which is then folded with PulsarX. The S/N thresholds and candidate limit
    for this fold come from `hierarchical_search.folding_configuration` (same syntax as
    `folding.configuration`), because the stage-2 `snr` is the fold S/N of the aligned profile, not
    the FFT S/N of stage 1.
@@ -156,7 +169,7 @@ hierarchical_search {
     stage1_cfg_regex = "30m/ck02/tb_ck.*"   // which stage-1 runs take part (null = all)
     merge_dm_ranges = 1
     nominal_mismatch = null               // null: MISMATCH of the stage-1 template bank header
-    tobs = null                           // null: TOBS of the bank header (else the segment length)
+    tobs = null                 // observation length (s) for a_n and the metric; null: the segment length
     period_min = null                     // null: SPIN PERIOD of the bank header
     clip_to_bank = 1                      // drop fine-grid templates outside the bank's PORB / mass region
     distance_tol = 50

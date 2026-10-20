@@ -161,8 +161,9 @@ def resolve_bank_parameters(args, reference_xml, what='fine grid', need_period=T
         if 'mismatch' not in hdr:
             logging.error("nominal_mismatch not given and no MISMATCH in the template bank header (%s)", bank); sys.exit(1)
         args.nominal_mismatch = hdr['mismatch']
-    if args.tobs is None and 'tobs_h' in hdr:
-        args.tobs = hdr['tobs_h'] * 3600.
+    if 'tobs_h' in hdr:
+        logging.info("template bank design length %.0f s; a_n, metric and lattices use the data span unless --tobs is given",
+                     hdr['tobs_h'] * 3600.)
     if need_period and args.period_min is None:
         if 'spin_period_ms' not in hdr:
             logging.error("period_min not given and no SPIN PERIOD in the template bank header (%s)", bank); sys.exit(1)
@@ -389,13 +390,25 @@ def _greedy_thin(points, radius):
     """
     Keep a subset of 'points' such that no two kept points are closer than 'radius'. Points are visited in
     order (earlier wins), so sort them by priority first. Vectorised rounds over the collision graph.
+    Uses a KD-tree when scipy is available; without scipy (fold jobs in the peasoup container) the collision
+    graph is built from the dense distance matrix in blocks, which is fine for the few thousand points of one peak.
     """
     n = len(points)
     keep = np.zeros(n, dtype=bool)
     alive = np.ones(n, dtype=bool)
-    tree = scipy.spatial.cKDTree(points)
-    coo = tree.sparse_distance_matrix(tree, radius, output_type='coo_matrix')
-    row, col = coo.row, coo.col
+    if HAVE_SCIPY:
+        tree = scipy.spatial.cKDTree(points)
+        coo = tree.sparse_distance_matrix(tree, radius, output_type='coo_matrix')
+        row, col = coo.row, coo.col
+    else:
+        rows, cols = [], []
+        sq = (points ** 2).sum(1)
+        for i0 in range(0, n, 2048):
+            d2 = sq[i0:i0 + 2048, None] + sq[None, :] - 2 * points[i0:i0 + 2048] @ points.T
+            r, c = np.nonzero(d2 <= radius * radius)
+            rows.append(r + i0); cols.append(c)
+        row = np.concatenate(rows) if rows else np.zeros(0, dtype=int)
+        col = np.concatenate(cols) if cols else np.zeros(0, dtype=int)
     while alive.any():
         # a point is accepted when no alive point with a smaller index collides with it
         best = np.full(n, n, dtype=np.int64)
@@ -414,7 +427,7 @@ def _greedy_thin(points, radius):
 
 
 def fill_gaps(centers, templates, owner, metric_fn, an_fn, halfrange, cover_radius, rounds=4, samples_per_template=8,
-              batch_size=2000, rng=None):
+              batch_size=2000, rng=None, inflate=1.2):
     """
     Poisson-disk fill-in: sample random points of every centre's region (ball of radius 'halfrange' in a_n space)
     and add a template wherever the nearest existing template is farther than 'cover_radius'. Added points are
@@ -441,7 +454,7 @@ def fill_gaps(centers, templates, owner, metric_fn, an_fn, halfrange, cover_radi
             cand_owner = np.repeat(np.arange(nb), nper)
             u = rng.normal(size=(len(cand_owner), 3))
             u /= np.linalg.norm(u, axis=1)[:, None]
-            u *= 1.2 * halfrange * rng.random(len(cand_owner))[:, None] ** (1. / 3.)
+            u *= inflate * halfrange * rng.random(len(cand_owner))[:, None] ** (1. / 3.)
             cand_par = cen[cand_owner] + np.einsum('nij,nj->ni', transform[cand_owner], u)
             ok = (cand_par[:, 0] > 0) & (cand_par[:, 1] > 0)
             cand_par, cand_owner = cand_par[ok], cand_owner[ok]
@@ -467,7 +480,8 @@ def fill_gaps(centers, templates, owner, metric_fn, an_fn, halfrange, cover_radi
 
 
 def advancing_front_lattice(centers, metric_fn, an_fn, halfrange, stepsize, batch_size=2000, max_layers=None,
-                            step_correction=True, dup_fraction=0.7, fill=True):
+                            step_correction=True, dup_fraction=0.7, fill=True, fill_rounds=4, fill_samples=8, fill_inflate=1.2,
+                            fill_cover=None):
     """
     Grow a lattice around every centre layer by layer (advancing front), re-evaluating the metric at each
     front point. Every distance test is done in Legendre-coefficient (a_n) space, where the mismatch is the
@@ -544,7 +558,8 @@ def advancing_front_lattice(centers, metric_fn, an_fn, halfrange, stepsize, batc
     templates, owner = np.concatenate(out_par), np.concatenate(out_owner)
     if fill:
         templates, owner = fill_gaps(centers, templates, owner, metric_fn, an_fn, halfrange,
-                                     cover_radius=stepsize * np.sqrt(3.) / 2., batch_size=batch_size)
+                                     cover_radius=stepsize * np.sqrt(3.) / 2. if fill_cover is None else fill_cover,
+                                     rounds=fill_rounds, samples_per_template=fill_samples, batch_size=batch_size, inflate=fill_inflate)
     return templates, owner
 
 
@@ -593,11 +608,14 @@ def cmd_cluster(args):
     stepsize = args.search_stepsize_fac * np.sqrt(args.nominal_mismatch)
     freq_max = 1. / args.period_min
     if args.lattice == 'adaptive':
-        templates, owner = advancing_front_lattice(
-            centers,
-            lambda t: circular_metric(t, freq_max, tobs, args.order_highest),
-            lambda t: orbital_an(t, freq_max, tobs, args.order_highest),
-            halfrange, stepsize)
+        templates, owner = adaptive_lattice(centers, freq_max, tobs, args.order_highest, halfrange, stepsize, refine=args.lattice_refine)
+    elif args.lattice == 'sample':
+        # the region of a peak is sized at the peak's own spin frequency (the highest among the peaks of the template)
+        f_center = np.zeros(len(centers))
+        np.maximum.at(f_center, peak_center, 1. / peaks['period'])
+        templates, owner = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                          nlead=args.sample_nlead, nsamples=args.sample_n, workers=args.workers,
+                                          pb_bounds=(bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None)
     else:
         metrics = circular_metric(centers, freq_max, tobs, args.order_highest)
         templates, owner = eigen_lattice(centers, metrics, halfrange, stepsize)
@@ -647,6 +665,42 @@ def cmd_cluster(args):
         json.dump(summary, f, indent=2)
 
 
+def sift_by_frequency(arrays, selected, fdiff, dm_tol, max_harm):
+    """
+    Period sifting of the stage-2 candidates: a bright pulsar is refined once per stage-1 peak, and those peaks sit
+    on different branches of the orbital model space (each matching a part of the segment), far apart in
+    coefficient space and up to the bank's maximal Doppler shift apart in frequency. They are the same signal
+    nonetheless: within 'fdiff' in fractional frequency (or a harmonic ratio p/q with p, q <= 'max_harm', within the
+    same tolerance) at the same DM (within dm_tol; a bright pulsar also appears at the neighbouring DM trials of the
+    group). Of every such group only the candidate with the highest S/N is kept. 'selected' are candidate indices into 'arrays'; returns the kept indices in decreasing S/N.
+    """
+    sel = np.asarray(selected)
+    if len(sel) == 0:
+        return sel
+    f = 1. / arrays['period'][sel]; dm = arrays['dm'][sel]; snr = arrays['snr'][sel]
+    order = np.argsort(-snr, kind='stable')
+    f, dm, sel_o = f[order], dm[order], sel[order]
+    # harmonic relations p/q with p, q <= max_harm (a bright pulsar is also found at 2/3, 3/2, ... of its frequency)
+    ratios = np.unique(np.array([p_ / q_ for p_ in range(1, max_harm + 1) for q_ in range(1, max_harm + 1)], dtype=np.float64))
+    keep = []
+    taken = np.zeros(len(sel_o), dtype=bool)
+    for i in range(len(sel_o)):
+        if taken[i]:
+            continue
+        keep.append(sel_o[i]); taken[i] = True
+        cand = np.flatnonzero(~taken)
+        if len(cand) == 0:
+            break
+        same_dm = np.abs(dm[cand] - dm[i]) <= dm_tol
+        r = f[cand] / f[i]
+        # r close to k or 1/k for some harmonic number k
+        close = np.zeros(len(cand), dtype=bool)
+        for k in ratios:
+            close |= np.abs(r / k - 1.) < fdiff
+        taken[cand[same_dm & close]] = True
+    return np.array(keep)
+
+
 def cmd_merge(args):
     infos, arrays, trees = read_many(args.input)
     ncands_total = len(arrays['snr'])
@@ -664,6 +718,11 @@ def cmd_merge(args):
                                        min_prominence=args.min_prominence, workers=args.workers)
         selected = np.flatnonzero(keep)[idx]
         logging.info("%d of %d candidates kept after clustering", len(selected), ncands_total)
+    if args.sift_fdiff > 0:
+        n_before = len(selected)
+        selected = sift_by_frequency(arrays, selected, args.sift_fdiff, args.sift_dm_tol, args.sift_max_harm)
+        logging.info("%d of %d candidates kept after the frequency sift (|df/f| < %g, harmonics up to %d)",
+                     len(selected), n_before, args.sift_fdiff, args.sift_max_harm)
     else:
         selected = np.arange(ncands_total)
 
@@ -706,6 +765,144 @@ def cmd_merge(args):
 ###############################################################################
 # Stage 2 by folding: sub-integration profiles aligned per template (LOKI / pyloki scheme)
 ###############################################################################
+
+def adaptive_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, refine=1, **kwargs):
+    """
+    Advancing-front lattice in the coordinates (log omega, log a1, phi). The region of parameter space within
+    'halfrange' of a centre is a thin, strongly curved sheet in (omega, a1, phi): a tight short-period orbit and
+    a wide long-period arc give nearly the same phase polynomial over one segment, and the valley connecting them
+    is only ~10-30 % wide in a1. In logarithmic coordinates that valley is nearly straight, so the front follows
+    it, while in linear coordinates the eigen-steps overshoot it and the front stops on the local branch.
+    The metric is transformed with the Jacobian diag(omega, a1, 1); an offset keeps the lattice coordinates
+    positive (the lattice routines drop non-positive values).
+    """
+    off = np.array([30.0, 20.0, 20.0])
+    to_u = lambda th: np.column_stack([np.log(th[:, 0]), np.log(th[:, 1]), th[:, 2]]) + off
+    from_u = lambda u: np.column_stack([np.exp(u[:, 0] - off[0]), np.exp(u[:, 1] - off[1]), u[:, 2] - off[2]])
+
+    def metric_u(u):
+        th = from_u(np.atleast_2d(u))
+        g = circular_metric(th, freq_max, tobs, order_highest)
+        jac = np.zeros((len(th), 3, 3))
+        jac[:, 0, 0] = th[:, 0]; jac[:, 1, 1] = th[:, 1]; jac[:, 2, 2] = 1.0
+        return np.einsum('nij,njk,nkl->nil', jac, g, jac)
+
+    an_u = lambda u: orbital_an(from_u(np.atleast_2d(u)), freq_max, tobs, order_highest)
+    if refine <= 1:
+        lat_u, owner = advancing_front_lattice(to_u(np.atleast_2d(centers)), metric_u, an_u, halfrange, stepsize, **kwargs)
+        return from_u(lat_u), owner
+    # Dense generation, then pruning in coefficient space: the front advances with a step stepsize/refine, small
+    # enough to follow narrow curved valleys of the region, and the result is thinned so that no two templates are
+    # closer than 'stepsize' (inner points first). Every dropped point lies within stepsize of a kept one, so the
+    # covering radius is at most stepsize + stepsize/refine.
+    cen = np.atleast_2d(centers)
+    lat_u, owner = advancing_front_lattice(to_u(cen), metric_u, an_u, halfrange, stepsize / refine, fill=False, **kwargs)
+    an = an_u(lat_u)
+    dist_c = np.linalg.norm(an - an_u(to_u(cen))[owner], axis=1)
+    order = np.argsort(dist_c, kind='stable')
+    key = np.hstack([an[order], owner[order][:, None] * (4.0 * halfrange)])
+    keep = order[_greedy_thin(key, stepsize)]
+    keep.sort()
+    return from_u(lat_u[keep]), owner[keep]
+
+
+def an_jac_log(u, freq, tobs, order_highest, off):
+    """
+    Legendre coefficients a_n (orders 2..order_highest) and their Jacobian with respect to the shifted
+    logarithmic coordinates u = (log omega, log a1, phi) + off, for templates given in those coordinates.
+    """
+    om = np.exp(u[:, 0] - off[0]); tau = np.exp(u[:, 1] - off[1]); al = u[:, 2] - off[2]
+    s_ = om * tobs / 2.; r = 2 * np.pi * freq * tau; p = s_ - al
+    K = order_highest - 1
+    an = np.empty((len(u), K)); jac = np.empty((len(u), K, 3))
+    for k, n in enumerate(range(2, order_highest + 1)):
+        c = np.sqrt(2 * n + 1); jn = spherical_jn(n, s_); djn = spherical_jn(n, s_, derivative=True)
+        sn = np.sin(p + n * np.pi / 2.); cs = np.cos(p + n * np.pi / 2.)
+        an[:, k] = -c * r * jn * sn
+        jac[:, k, 0] = -c * r * (djn * sn + jn * cs) * tobs / 2. * om
+        jac[:, k, 1] = -c * 2 * np.pi * freq * jn * sn * tau
+        jac[:, k, 2] = c * r * jn * cs
+    return an, jac
+
+
+def _single_threaded_blas():
+    """Worker initialiser: one BLAS/OpenMP thread per process (the work is split over processes already)."""
+    try:
+        import threadpoolctl
+        threadpoolctl.threadpool_limits(1)
+    except ImportError:
+        pass
+
+
+def sample_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, nlead=3, nsamples=2000, iters=40,
+                   pb_bounds=None, a1_bounds=(1e-4, 50.), batch_rows=400000, seed=0, workers=1):
+    """
+    Fine grid by sampling the leading Legendre coefficients.
+
+    For every centre (a stage-1 peak template) the leading coefficients (orders 2..nlead+1) are sampled uniformly in
+    the ball of radius 'halfrange' around the centre's coefficients. Each sample is a target for which the Keplerian
+    parameters are solved by batched Levenberg-Marquardt in (log omega, log a1, phi), starting from the centre. With
+    nlead = 3 the system is exactly determined and every target on which the map is invertible yields an orbit; the
+    solver follows the curved valleys of the coefficient space that a metric lattice cannot, so the other branches
+    of the region (e.g. a tight low-mass orbit aliased by a wide long-period arc) are found. The higher orders follow
+    from the solved orbit; solutions outside the full ball or not converged are dropped, and the rest is pruned in
+    coefficient space so that no two templates are closer than 'stepsize' (inner points first). The number of
+    templates is set by the 3-D volume of the region, not by the expansion order.
+    Returns (templates, owner) like eigen_lattice.
+    """
+    rng = np.random.default_rng(seed)
+    cen = np.atleast_2d(centers); ncen = len(cen)
+    freq_cen = np.broadcast_to(np.asarray(freq_max, dtype=np.float64), (ncen,))
+    off = np.array([30., 20., 20.])
+    u_cen = np.column_stack([np.log(cen[:, 0]), np.log(cen[:, 1]), cen[:, 2]]) + off
+    an_cen, _ = an_jac_log(u_cen, freq_cen, tobs, order_highest, off)
+    K = nlead
+    lo = np.array([np.log(2 * np.pi / (pb_bounds[1] * 2.)) if pb_bounds else -np.inf, np.log(a1_bounds[0]), -np.inf]) + off
+    hi = np.array([np.log(2 * np.pi / (pb_bounds[0] / 2.)) if pb_bounds else np.inf, np.log(a1_bounds[1]), np.inf]) + off
+    per_batch = max(1, batch_rows // nsamples)
+    if workers > 1 and ncen > per_batch:
+        # independent centres: distribute batches of centres over processes
+        from concurrent.futures import ProcessPoolExecutor
+        parts = [(b0, min(ncen, b0 + per_batch)) for b0 in range(0, ncen, per_batch)]
+        with ProcessPoolExecutor(max_workers=workers, initializer=_single_threaded_blas) as ex:
+            futs = [ex.submit(sample_lattice, cen[a:b], freq_cen[a:b], tobs, order_highest, halfrange, stepsize, nlead, nsamples,
+                              iters, pb_bounds, a1_bounds, batch_rows, seed + a, 1) for a, b in parts]
+            outs = [f.result() for f in futs]
+        return np.concatenate([o[0] for o in outs]), np.concatenate([o[1] + a for o, (a, b) in zip(outs, parts)])
+    out_par, out_owner = [], []
+    for b0 in range(0, ncen, per_batch):
+        idx = np.arange(b0, min(ncen, b0 + per_batch))
+        owner = np.repeat(idx, nsamples)
+        g = rng.normal(size=(len(owner), K)); g /= np.linalg.norm(g, axis=1)[:, None]
+        target = an_cen[owner, :K] + g * halfrange * rng.random(len(owner))[:, None] ** (1. / K)
+        u = u_cen[owner].copy(); lam = np.full(len(owner), 1e-2); fq = freq_cen[owner]
+        an, jac = an_jac_log(u, fq, tobs, order_highest, off); res = an[:, :K] - target; cost = (res ** 2).sum(1)
+        for _ in range(iters):
+            J = jac[:, :K, :]
+            A = np.einsum('nki,nkj->nij', J, J); A[:, [0, 1, 2], [0, 1, 2]] *= (1 + lam)[:, None]
+            b = -np.einsum('nki,nk->ni', J, res)
+            try:
+                delta = np.linalg.solve(A, b[:, :, None])[:, :, 0]
+            except np.linalg.LinAlgError:
+                A[:, [0, 1, 2], [0, 1, 2]] += 1e-9
+                delta = np.linalg.solve(A, b[:, :, None])[:, :, 0]
+            nrm = np.linalg.norm(delta, axis=1); delta *= np.minimum(1., 0.5 / np.maximum(nrm, 1e-12))[:, None]
+            u_new = np.clip(u + delta, lo, hi)
+            an_new, jac_new = an_jac_log(u_new, fq, tobs, order_highest, off); res_new = an_new[:, :K] - target
+            cost_new = (res_new ** 2).sum(1); better = cost_new < cost
+            u[better] = u_new[better]; an[better] = an_new[better]; jac[better] = jac_new[better]; res[better] = res_new[better]; cost[better] = cost_new[better]
+            lam = np.where(better, lam * 0.3, lam * 5.)
+        dist = np.linalg.norm(an - an_cen[owner], axis=1)
+        inside = (dist <= halfrange) & (np.sqrt(cost) < 0.5 * stepsize)
+        th = np.column_stack([np.exp(u[:, 0] - off[0]), np.exp(u[:, 1] - off[1]), np.mod(u[:, 2] - off[2], 2 * np.pi)])
+        th, an, dist, owner = th[inside], an[inside], dist[inside], owner[inside]
+        order_ = np.argsort(dist, kind='stable')
+        key = np.hstack([an[order_], owner[order_][:, None] * (4.0 * halfrange)])
+        keep = order_[_greedy_thin(key, stepsize)]
+        # the centre itself is always part of its lattice
+        out_par.append(np.concatenate([cen[idx], th[keep]])); out_owner.append(np.concatenate([idx, owner[keep]]))
+    return np.concatenate(out_par), np.concatenate(out_owner)
+
 
 def read_presto_inf(inf_file):
     """Parse a PRESTO-style .inf file (as written by peasoup -d) into a dict."""
@@ -1102,7 +1299,7 @@ def cmd_foldsearch(args):
     bank_hdr = resolve_bank_parameters(args, args.reference_xml, 'fine grid')
     tobs = next(iter(series.values()))[1].get('nsamples', ref_info['segment_nsamples']) * tsamp
     if args.tobs is not None:
-        tobs = args.tobs      # bank design length (or explicit); the series may be zero-padded beyond it
+        tobs = args.tobs
     pepoch = ref_info['segment_pepoch']
     halfrange = args.search_halfrange_fac * np.sqrt(args.nominal_mismatch)
     stepsize = args.search_stepsize_fac * np.sqrt(args.nominal_mismatch)
@@ -1129,8 +1326,12 @@ def cmd_foldsearch(args):
         if iu not in lattices:
             centers = uniq_tmpl[iu][None, :]
             if args.lattice == 'adaptive':
-                lattices[iu], _ = advancing_front_lattice(centers, lambda t: circular_metric(t, freq_max, tobs, args.order_highest),
-                                                          lambda t: orbital_an(t, freq_max, tobs, args.order_highest), halfrange, stepsize)
+                lattices[iu], _ = adaptive_lattice(centers, freq_max, tobs, args.order_highest, halfrange, stepsize, refine=args.lattice_refine)
+            elif args.lattice == 'sample':
+                f_center = max(float(peak_f0[ip]) for ip in range(len(peaks)) if tmpl_of_peak[ip] == iu)
+                lattices[iu], _ = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                                 nlead=args.sample_nlead, nsamples=args.sample_n,
+                                                 pb_bounds=(bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None)
             else:
                 lattices[iu], _ = eigen_lattice(centers, circular_metric(centers, freq_max, tobs, args.order_highest), halfrange, stepsize)
             if not args.no_bank_clip and bank_hdr:
@@ -1142,6 +1343,7 @@ def cmd_foldsearch(args):
     best_of_peak = [None] * len(peaks)
     nsub_of_peak = [0] * len(peaks)
     ntemplates_total = 0
+    ntemplates_extra = [0]     # evaluations of the local refinement (see --refine_iter)
 
     def search_peak(ip, ts, dm):
         """Score the lattice of peak ip on the series ts (already in the frame of its template if resampling)."""
@@ -1177,10 +1379,81 @@ def cmd_foldsearch(args):
         ipk = int(np.argmin(np.linalg.norm(templates - peak_tmpl[ip], axis=1)))   # the peak's own template
         res = dict(snr=float(snr[i]), width=int(wid[i]), template=templates[i].copy(),
                    dfreq=float(f0_fold[i] + df[i] - f0), dfreq_grid=float(df[i]), itemplate=i,
-                   snr_peak_template=float(snr[ipk]), dm=float(dm), nsub=nsub, drift=float(args.nbins * args.f0_halfrange_bins / nsub))
+                   snr_peak_template=float(snr[ipk]), dm=float(dm), nsub=nsub, drift=float(args.nbins * args.f0_halfrange_bins / nsub),
+                   refined=0)
         if best_of_peak[ip] is None or res['snr'] > best_of_peak[ip]['snr']:
             best_of_peak[ip] = res
+            nsub_of_peak[ip] = nsub
         return len(templates)
+
+    def refine_peaks_batched(dat, ips):
+        """
+        Iterative local refinement of the best (orbit, frequency) of several peaks at once (one tool call per
+        iteration for all of them). Around each current best orbit the S/N is evaluated at +-h along the three
+        eigen-directions of the local metric (h starts at half the grid step, in Legendre distance) and a parabola
+        per direction gives the step to its vertex; h is halved every iteration. The frequency is searched by the
+        tool in a narrow window around the orbit's own frequency. Needs 7 evaluations per peak and iteration
+        instead of a dense sub-grid; a peak keeps its original result unless the refinement improves the S/N.
+        """
+        nit = args.refine_iter
+        centres = np.array([best_of_peak[ip]['template'] for ip in ips], dtype=np.float64)
+        f_c = np.array([peak_f0[ip] + best_of_peak[ip]['dfreq'] for ip in ips])       # signal frequency in each centre's frame
+        snr_c = np.array([best_of_peak[ip]['snr'] for ip in ips]); wid_c = np.array([best_of_peak[ip]['width'] for ip in ips])
+        h = 0.5 * stepsize
+        nsub_r = max(nsub_of_peak[ip] for ip in ips) if any(nsub_of_peak[ip] for ip in ips) else (args.nsub if args.nsub > 0 else 256)
+        win, dstep = 2 * args.f0_step_bins, args.f0_step_bins / 4.
+        t_fine = np.linspace(0, tobs, 1024)
+        for it in range(nit):
+            logging.debug("refinement iteration %d/%d: orbital step h = %.3f rad (%.2f grid steps), frequency window +-%.2f bins at %.4f",
+                          it + 1, nit, h, h / stepsize, win, dstep)
+            g = circular_metric(centres, f_c, tobs, args.order_highest)
+            ev, evec = np.linalg.eigh(g); ev = np.maximum(ev, ev.max(axis=1, keepdims=True) * 1e-12)
+            dirs = evec / np.sqrt(ev)[:, None, :]                                     # unit metric steps, (P, 3, 3)
+            trials, f_fold, owner, axis = [], [], [], []
+            for k, c in enumerate(centres):
+                pts = [c] + [c + sg * h * dirs[k, :, a] for a in range(3) for sg in (+1., -1.)]
+                pts = np.array(pts)
+                bad = (pts[:, 0] <= 0) | (pts[:, 1] <= 0)
+                pts[bad] = c
+                _, slope = template_shifts(pts, f_c[k], c, t_fine, 0.0)
+                trials.append(pts); f_fold.append(f_c[k] - slope); owner += [k] * 7; axis += [(-1, 0)] + [(a, sg) for a in range(3) for sg in (+1, -1)]
+            trials = np.concatenate(trials); f_fold = np.concatenate(f_fold); owner = np.array(owner)
+            snr_t, wid_t, dfb_t = gpu_fold_search(args.resampler, dat, trials, f_fold, nsub_r, args.nbins, win, dstep, args.ducy_max, args.resampler_mode)
+            ntemplates_extra[0] += len(trials)
+            snr_t = snr_t.reshape(len(centres), 7); dfb_t = dfb_t.reshape(len(centres), 7); wid_t = wid_t.reshape(len(centres), 7)
+            new_centres = centres.copy()
+            for k, c in enumerate(centres):
+                s0 = snr_t[k, 0]; delta = np.zeros(3)
+                for a in range(3):
+                    sp, sm = snr_t[k, 1 + 2 * a], snr_t[k, 2 + 2 * a]
+                    curv = sp - 2 * s0 + sm
+                    if curv < 0:
+                        delta[a] = np.clip(0.5 * (sm - sp) / curv, -1., 1.) * h
+                    else:                                   # no maximum between: move towards the better side
+                        delta[a] = h if sp > max(s0, sm) else (-h if sm > max(s0, sp) else 0.)
+                new_centres[k] = c + sum(delta[a] * dirs[k, :, a] for a in range(3))
+                if new_centres[k, 0] <= 0 or new_centres[k, 1] <= 0:
+                    new_centres[k] = c
+                # frequency of the signal in the frame of the new centre: the centre's refined value, shifted by the linear term
+                f_here = f_fold[7 * k] + dfb_t[k, 0] / tobs
+                _, sl = template_shifts(new_centres[k][None, :], f_here, c, t_fine, 0.0)
+                f_c[k] = f_here - sl[0]
+                # keep the best evaluated point of this iteration as the running result
+                j = int(np.argmax(snr_t[k]))
+                if snr_t[k, j] > snr_c[k]:
+                    snr_c[k], wid_c[k] = snr_t[k, j], wid_t[k, j]
+                    ip = ips[k]; tmpl = trials[7 * k + j]
+                    best_of_peak[ip].update(snr=float(snr_t[k, j]), width=int(wid_t[k, j]), template=tmpl.copy(),
+                                            dfreq=float(f_fold[7 * k + j] + dfb_t[k, j] / tobs - peak_f0[ip]), refined=it + 1)
+            centres = new_centres
+            h *= 0.5
+        # final evaluation at the converged centres
+        snr_t, wid_t, dfb_t = gpu_fold_search(args.resampler, dat, centres, f_c, nsub_r, args.nbins, win, dstep, args.ducy_max, args.resampler_mode)
+        ntemplates_extra[0] += len(centres)
+        for k, ip in enumerate(ips):
+            if snr_t[k] > snr_c[k]:
+                best_of_peak[ip].update(snr=float(snr_t[k]), width=int(wid_t[k]), template=centres[k].copy(),
+                                        dfreq=float(f_c[k] + dfb_t[k] / tobs - peak_f0[ip]), refined=nit + 1)
 
     # Work list: (DM trial, unique template) -> peaks
     work = {}
@@ -1196,6 +1469,12 @@ def cmd_foldsearch(args):
                 nfold += n
                 ntemplates_total += n * len(dfreqs)
         logging.info("%d templates resampled and folded on the device for %d peaks", nfold, len(peaks))
+        if args.refine_iter > 0:
+            for dm in sorted({k[0] for k in work}):
+                ips = [ip for ip in range(len(peaks)) if best_of_peak[ip] is not None and round(best_of_peak[ip]['dm'], 4) == dm]
+                if ips:
+                    refine_peaks_batched(series[dm][2], ips)
+            logging.info("local refinement: %d template evaluations in %d iterations", ntemplates_extra[0], args.refine_iter)
     elif args.resampler:
         import shutil
         nres = 0
@@ -1228,13 +1507,14 @@ def cmd_foldsearch(args):
         f0_new = f0 + best['dfreq']
         cands.append(dict(period=1. / f0_new, dm=best['dm'], pb=pb_days, a1=tmpl[1], phi=phi_deg,
                           t0=pepoch + (phi_deg / 360.) * pb_days, snr=best['snr'],
-                          extra=dict(fold_width_bins=best['width'], fold_dfreq=best['dfreq'],
+                          extra=dict(fold_width_bins=best['width'], fold_dfreq=best['dfreq'], fold_refined=best.get('refined', 0),
                                      fold_snr_peak_template=best['snr_peak_template'], stage1_snr=p['snr'],
                                      stage1_period=p['period'], fold_nsub=best['nsub'])))
         logging.info("peak %d/%d: f0 %.6f stage-1 S/N %s -> fold S/N %.2f (peak template %.2f), width %d bins, df %.2e Hz, DM %.3f, nsub %d (99%% drift %.2f bins)",
                      ip + 1, len(peaks), f0, p['snr'], best['snr'], best['snr_peak_template'], best['width'], best['dfreq'], best['dm'], best['nsub'], best['drift'])
     write_peasoup_like_xml(args.reference_xml, args.output, cands, ntemplates_total)
-    logging.info("wrote %s with %d candidates (%d template evaluations)", args.output, len(cands), ntemplates_total)
+    logging.info("wrote %s with %d candidates (%d template evaluations + %d in the local refinement)", args.output, len(cands),
+                 ntemplates_total, ntemplates_extra[0])
 
 
 ###############################################################################
@@ -1279,9 +1559,15 @@ def main():
                     help='shortest spin period (s) at which the metric is evaluated (default: SPIN PERIOD from the bank header)')
     pc.add_argument('--no_bank_clip', action='store_true',
                     help='do not drop fine-grid templates outside the physical region of the bank (PORB, mass limits)')
-    pc.add_argument('--lattice', choices=['linear', 'adaptive'], default='linear',
-                    help='linear: lattice from the metric at the peak; adaptive: advancing front that re-evaluates '
-                         'the metric layer by layer and measures every distance in Legendre-coefficient space')
+    pc.add_argument('--lattice', choices=['linear', 'adaptive', 'sample'], default='linear',
+                    help='linear: lattice from the metric at the peak; adaptive: advancing front in (log omega, log a1, phi) '
+                         'that re-evaluates the metric layer by layer and measures every distance in Legendre-coefficient '
+                         'space (follows the curved valleys that connect aliased orbits)')
+    pc.add_argument('--sample_nlead', type=int, default=3, help='sample lattice: leading orders sampled (default 3, exactly determined)')
+    pc.add_argument('--sample_n', type=int, default=2000, help='sample lattice: samples per peak before pruning (default 2000)')
+    pc.add_argument('--lattice_refine', type=int, default=1,
+                    help='adaptive lattice only: advance the front with a step stepsize/refine and prune the result in '
+                         'Legendre space to the step size (1 = off)')
     pc.add_argument('--max_peaks', type=int, default=None,
                     help='keep at most this many peaks (the brightest) for the fine grid')
     pc.add_argument('--max_templates', type=int, default=None,
@@ -1290,6 +1576,12 @@ def main():
 
     pm = sub.add_parser('merge', help='merge stage-2 chunk XML files into one XML file')
     pm.add_argument('-i', '--input', nargs='+', required=True, help='stage-2 peasoup XML files')
+    pm.add_argument('--sift_fdiff', type=float, default=0.0,
+                    help='period sift after clustering: merge candidates at the same DM whose frequencies agree within '
+                         'this fraction (or an integer harmonic ratio), keeping the brightest (0 = off; e.g. 3e-3, the '
+                         "bank's maximal Doppler shift a1*omega)")
+    pm.add_argument('--sift_dm_tol', type=float, default=1.5, help='DM tolerance of the sift in pc/cc (default 1.5, i.e. the DM trials of one group)')
+    pm.add_argument('--sift_max_harm', type=int, default=8, help='harmonic ratios p/q with p, q up to this number are merged by the sift (default 8)')
     pm.add_argument('-o', '--output', default='output.xml')
     pm.add_argument('--cluster', action='store_true', help='keep only S/N peaks in a_n space')
     add_cluster_options(pm)
@@ -1344,7 +1636,13 @@ def main():
     pf.add_argument('--tobs', type=float, default=None,
                     help='observation length (s) for a_n, the metric and the df grid (default: TOBS of the bank, else the series length)')
     pf.add_argument('--no_bank_clip', action='store_true')
-    pf.add_argument('--lattice', choices=['linear', 'adaptive'], default='linear')
+    pf.add_argument('--lattice', choices=['linear', 'adaptive', 'sample'], default='linear')
+    pf.add_argument('--lattice_refine', type=int, default=1)
+    pf.add_argument('--refine_iter', type=int, default=3,
+                    help='iterations of the local refinement of each peak (parabolic steps along the metric eigen-directions '
+                         'starting at half the grid step, halved every iteration; 7 evaluations per peak and iteration; 0 = off)')
+    pf.add_argument('--sample_nlead', type=int, default=3)
+    pf.add_argument('--sample_n', type=int, default=2000)
     pf.set_defaults(func=cmd_foldsearch)
 
     args = parser.parse_args()
