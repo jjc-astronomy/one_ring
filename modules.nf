@@ -685,8 +685,6 @@ process merge_hierarchical_candidates {
     def hs = params.hierarchical_search
     def optional_args = ""
     if (hs.cluster_stage2 == 1) optional_args += " --cluster"
-    if ((hs.sift_fdiff ?: 0) > 0) optional_args += " --sift_fdiff ${hs.sift_fdiff} --sift_dm_tol ${hs.sift_dm_tol ?: 1.5}" +
-                                                   " --sift_min_snr ${hs.sift_min_snr ?: 15} --sift_dup_bins ${hs.sift_dup_bins ?: 3}"
     if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)        optional_args += " --tobs ${hs.tobs}"
     """
