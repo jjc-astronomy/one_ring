@@ -665,22 +665,27 @@ def cmd_cluster(args):
         json.dump(summary, f, indent=2)
 
 
-def sift_by_frequency(arrays, selected, fdiff, dm_tol, max_harm):
+def sift_by_frequency(arrays, selected, fdiff, dm_tol, max_harm, tobs, min_snr=15., harm_min_snr=30., dup_bins=3., dup_dm=0.):
     """
-    Period sifting of the stage-2 candidates: a bright pulsar is refined once per stage-1 peak, and those peaks sit
-    on different branches of the orbital model space (each matching a part of the segment), far apart in
-    coefficient space and up to the bank's maximal Doppler shift apart in frequency. They are the same signal
-    nonetheless: within 'fdiff' in fractional frequency (or a harmonic ratio p/q with p, q <= 'max_harm', within the
-    same tolerance) at the same DM (within dm_tol; a bright pulsar also appears at the neighbouring DM trials of the
-    group). Of every such group only the candidate with the highest S/N is kept. 'selected' are candidate indices into 'arrays'; returns the kept indices in decreasing S/N.
+    Period sifting of the stage-2 candidates, in three tiers by the S/N of the absorbing candidate (visited in
+    decreasing S/N):
+      - S/N >= harm_min_snr: a bright pulsar is refined once per stage-1 peak on different branches of the orbital
+        model space (each matching a part of the segment), and is also found at harmonic ratios; everything at the
+        same DM group (within dm_tol) within 'fdiff' of a ratio p/q (p, q <= max_harm) of its frequency is absorbed.
+      - S/N >= min_snr: the same for the fundamental only (|df/f| < fdiff). Only bright signals have such alias
+        families; near the threshold a candidate is found by one template.
+      - below min_snr: only exact duplicates are absorbed (same DM trial within dup_dm, frequency within dup_bins
+        Fourier bins), so that a faint real signal cannot be swallowed by a brighter noise candidate at some
+        rational frequency ratio.
+    Of every group only the candidate with the highest S/N is kept. 'selected' are candidate indices into 'arrays';
+    returns the kept indices in decreasing S/N.
     """
     sel = np.asarray(selected)
     if len(sel) == 0:
         return sel
     f = 1. / arrays['period'][sel]; dm = arrays['dm'][sel]; snr = arrays['snr'][sel]
     order = np.argsort(-snr, kind='stable')
-    f, dm, sel_o = f[order], dm[order], sel[order]
-    # harmonic relations p/q with p, q <= max_harm (a bright pulsar is also found at 2/3, 3/2, ... of its frequency)
+    f, dm, snr_o, sel_o = f[order], dm[order], snr[order], sel[order]
     ratios = np.unique(np.array([p_ / q_ for p_ in range(1, max_harm + 1) for q_ in range(1, max_harm + 1)], dtype=np.float64))
     keep = []
     taken = np.zeros(len(sel_o), dtype=bool)
@@ -691,13 +696,16 @@ def sift_by_frequency(arrays, selected, fdiff, dm_tol, max_harm):
         cand = np.flatnonzero(~taken)
         if len(cand) == 0:
             break
-        same_dm = np.abs(dm[cand] - dm[i]) <= dm_tol
         r = f[cand] / f[i]
-        # r close to k or 1/k for some harmonic number k
-        close = np.zeros(len(cand), dtype=bool)
-        for k in ratios:
-            close |= np.abs(r / k - 1.) < fdiff
-        taken[cand[same_dm & close]] = True
+        if snr_o[i] >= harm_min_snr:
+            close = np.zeros(len(cand), dtype=bool)
+            for k in ratios:
+                close |= np.abs(r / k - 1.) < fdiff
+            taken[cand[(np.abs(dm[cand] - dm[i]) <= dm_tol) & close]] = True
+        elif snr_o[i] >= min_snr:
+            taken[cand[(np.abs(dm[cand] - dm[i]) <= dm_tol) & (np.abs(r - 1.) < fdiff)]] = True
+        else:
+            taken[cand[(np.abs(dm[cand] - dm[i]) <= dup_dm + 1e-6) & (np.abs(f[cand] - f[i]) * tobs < dup_bins)]] = True
     return np.array(keep)
 
 
@@ -720,9 +728,12 @@ def cmd_merge(args):
         logging.info("%d of %d candidates kept after clustering", len(selected), ncands_total)
     if args.sift_fdiff > 0:
         n_before = len(selected)
-        selected = sift_by_frequency(arrays, selected, args.sift_fdiff, args.sift_dm_tol, args.sift_max_harm)
-        logging.info("%d of %d candidates kept after the frequency sift (|df/f| < %g, harmonics up to %d)",
-                     len(selected), n_before, args.sift_fdiff, args.sift_max_harm)
+        selected = sift_by_frequency(arrays, selected, args.sift_fdiff, args.sift_dm_tol, args.sift_max_harm, tobs,
+                                     min_snr=args.sift_min_snr, harm_min_snr=args.sift_harm_min_snr,
+                                     dup_bins=args.sift_dup_bins, dup_dm=args.sift_dup_dm)
+        logging.info("%d of %d candidates kept after the period sift (|df/f| < %g for S/N >= %g, harmonics p/q <= %d for "
+                     "S/N >= %g, duplicates within %g bins otherwise)", len(selected), n_before, args.sift_fdiff,
+                     args.sift_min_snr, args.sift_max_harm, args.sift_harm_min_snr, args.sift_dup_bins)
     else:
         selected = np.arange(ncands_total)
 
@@ -1582,6 +1593,10 @@ def main():
                          "bank's maximal Doppler shift a1*omega)")
     pm.add_argument('--sift_dm_tol', type=float, default=1.5, help='DM tolerance of the sift in pc/cc (default 1.5, i.e. the DM trials of one group)')
     pm.add_argument('--sift_max_harm', type=int, default=8, help='harmonic ratios p/q with p, q up to this number are merged by the sift (default 8)')
+    pm.add_argument('--sift_min_snr', type=float, default=15., help='sift: only candidates at or above this S/N absorb others within the Doppler window (default 15)')
+    pm.add_argument('--sift_harm_min_snr', type=float, default=30., help='sift: only candidates at or above this S/N absorb harmonics (default 30)')
+    pm.add_argument('--sift_dup_bins', type=float, default=3., help='sift: fainter candidates absorb only duplicates within this many Fourier bins at the same DM trial (default 3)')
+    pm.add_argument('--sift_dup_dm', type=float, default=0., help='sift: DM tolerance of the duplicate rule in pc/cc (default 0 = same trial)')
     pm.add_argument('-o', '--output', default='output.xml')
     pm.add_argument('--cluster', action='store_true', help='keep only S/N peaks in a_n space')
     add_cluster_options(pm)
