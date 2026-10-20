@@ -1267,6 +1267,7 @@ def cmd_foldsearch(args):
     dfreqs = np.arange(-args.f0_halfrange_bins, args.f0_halfrange_bins + 1e-9, args.f0_step_bins) / tobs
 
     # Per peak: fold frequency, orbital template, DM trials used
+    peaks0 = list(peaks)
     peak_f0 = np.array([1. / float(p['period']) for p in peaks])
     peak_tmpl = np.array([[float(p['angular_velocity']), float(p['asini_c']), float(p['orb_phase_rad'])] for p in peaks]).reshape(-1, 3)
     peak_dms = [dms[np.argsort(np.abs(dms - float(p['dm'])))[:args.dm_trials]] for p in peaks]
@@ -1420,19 +1421,85 @@ def cmd_foldsearch(args):
         for dm in peak_dms[ip]:
             work.setdefault((round(float(dm), 4), int(tmpl_of_peak[ip])), []).append(ip)
 
+    results = []            # final (origin peak index, centre frequency, best dict, rounds, dist_frac, df_frac)
     if args.resampler and args.gpu_fold:
-        nfold = 0
-        for (dm, iu), ips in work.items():
-            for ip in ips:
-                n = search_peak_gpu_fold(ip, series[dm][2], dm)
-                nfold += n
-                ntemplates_total += n * len(dfreqs)
-        logging.info("%d templates resampled and folded on the device for %d peaks", nfold, len(peaks))
-        if args.refine_iter > 0:
-            for dm in sorted({k[0] for k in work}):
-                ips = [ip for ip in range(len(peaks)) if best_of_peak[ip] is not None and round(best_of_peak[ip]['dm'], 4) == dm]
-                if ips:
-                    refine_peaks_batched(series[dm][2], ips)
+        # Iterative search ("branch drift"): a peak whose best template ends up near the edge of its search ball
+        # (or of its frequency scan) has its optimum outside the ball, so its branch is re-centred on that result
+        # and searched again in the next round. After every round all current branches (finished and drifting) are
+        # clustered in spin-frequency and Legendre-coefficient space, so branches of the same signal that have
+        # converged are merged into the brightest. The loop ends when no branch drifts or after max_rounds.
+        n0 = len(peaks)
+        origin = np.arange(n0)                      # stage-1 peak index of every active branch
+        rounds = np.zeros(n0, dtype=int)
+        finished = []                               # entries of 'results'
+        halfrange0 = halfrange
+        for rnd in range(1, args.max_rounds + 1):
+            # the region of a drifting branch grows every round (its optimum was out of reach in the previous one)
+            halfrange = halfrange0 * args.grow_halfrange ** (rnd - 1)
+            lattices.clear(); work.clear()
+            best_of_peak[:] = [None] * len(peaks); nsub_of_peak[:] = [0] * len(peaks)
+            for ip in range(len(peaks)):
+                for dm in peak_dms[ip]:
+                    work.setdefault((round(float(dm), 4), int(tmpl_of_peak[ip])), []).append(ip)
+            nfold = 0
+            for (dm, iu), ips in work.items():
+                for ip in ips:
+                    n = search_peak_gpu_fold(ip, series[dm][2], dm)
+                    nfold += n
+                    ntemplates_total += n * len(dfreqs)
+            # position of every result inside its search region
+            d_frac = np.array([np.linalg.norm(orbital_an(best_of_peak[ip]['template'][None, :], peak_f0[ip], tobs, args.order_highest)[0]
+                                              - orbital_an(peak_tmpl[ip][None, :], peak_f0[ip], tobs, args.order_highest)[0]) / halfrange
+                               for ip in range(len(peaks))])
+            f_frac = np.array([abs(best_of_peak[ip]['dfreq_grid']) * tobs / args.f0_halfrange_bins for ip in range(len(peaks))])
+            drifting = (d_frac > args.edge_frac) | (f_frac > args.edge_frac)
+            # cluster all branches (finished ones included): branches that converged to the same solution merge
+            cur = [(origin[ip], peak_f0[ip], best_of_peak[ip], rounds[ip] + 1, d_frac[ip], f_frac[ip]) for ip in range(len(peaks))]
+            allb = finished + cur
+            arr = dict(period=np.array([1. / (b[1] + b[2]['dfreq']) for b in allb]),
+                       template=np.array([b[2]['template'] for b in allb]).reshape(-1, 3),
+                       snr=np.array([b[2]['snr'] for b in allb]))
+            if len(allb) > 1:
+                idx_keep, _, _ = cluster_candidates(arr, tobs, args.order_highest, args.f0tol_fac, args.nominal_mismatch,
+                                                    args.distance_tol, min_prominence=args.min_prominence, workers=1)
+                keep = np.zeros(len(allb), dtype=bool); keep[idx_keep] = True
+            else:
+                keep = np.ones(len(allb), dtype=bool)
+            nfin = len(finished)
+            finished = [b for b, k in zip(finished, keep[:nfin]) if k]
+            keep_cur = keep[nfin:]
+            n_cont = int((keep_cur & drifting).sum()) if rnd < args.max_rounds else 0
+            logging.info("round %d: %d branches searched (%d templates folded), %d at the edge of their region, "
+                         "%d merged by clustering, %d finished, %d continue", rnd, len(peaks), nfold, int(drifting.sum()),
+                         int((~keep_cur).sum()), int(keep_cur.sum()) - n_cont, n_cont)
+            cont = []
+            for ip in range(len(peaks)):
+                if not keep_cur[ip]:
+                    continue
+                if drifting[ip] and rnd < args.max_rounds:
+                    cont.append(ip)
+                else:
+                    finished.append(cur[ip])
+            if not cont:
+                break
+            # re-centre the drifting branches on their best result: new template, new frequency, best DM trial
+            peaks = [peaks[ip] for ip in cont]
+            origin = origin[cont]; rounds = rounds[cont] + 1
+            peak_f0 = np.array([cur[ip][1] + cur[ip][2]['dfreq'] for ip in cont])
+            peak_tmpl = np.array([cur[ip][2]['template'] for ip in cont]).reshape(-1, 3)
+            peak_dms = [np.array([cur[ip][2]['dm']]) for ip in cont]
+            uniq_tmpl, tmpl_of_peak = np.unique(peak_tmpl, axis=0, return_inverse=True)
+            tmpl_of_peak = np.asarray(tmpl_of_peak).ravel()
+        results = finished
+        # refinement of the final branches, batched per DM trial
+        if args.refine_iter > 0 and results:
+            peaks = [peaks0[b[0]] for b in results]
+            peak_f0 = np.array([b[1] for b in results]); peak_tmpl = np.array([b[2]['template'] for b in results]).reshape(-1, 3)
+            best_of_peak[:] = [b[2] for b in results]; nsub_of_peak[:] = [b[2]['nsub'] for b in results]
+            for dm in sorted({round(b[2]['dm'], 4) for b in results}):
+                ips = [k for k, b in enumerate(results) if round(b[2]['dm'], 4) == dm]
+                refine_peaks_batched(series[dm][2], ips)
+            results = [(b[0], b[1], best_of_peak[k], b[3], b[4], b[5]) for k, b in enumerate(results)]
             logging.info("local refinement: %d template evaluations in %d iterations", ntemplates_extra[0], args.refine_iter)
     elif args.resampler:
         import shutil
@@ -1455,22 +1522,32 @@ def cmd_foldsearch(args):
             ts = series[dm][0]
             for ip in ips:
                 ntemplates_total += search_peak(ip, ts, dm)
+    if not (args.resampler and args.gpu_fold):
+        results = [(ip, peak_f0[ip], best_of_peak[ip], 1, float('nan'), float('nan')) for ip in range(len(peaks))]
 
     cands = []
-    for ip, p in enumerate(peaks):
-        best = best_of_peak[ip]
-        f0 = peak_f0[ip]
+    for k, (ip0, f0, best, nround, d_frac, f_frac) in enumerate(results):
+        p = peaks0[ip0]
         tmpl = best['template']
         pb_days = 2 * np.pi / tmpl[0] / 86400.
         phi_deg = np.rad2deg(tmpl[2] % (2 * np.pi))
         f0_new = f0 + best['dfreq']
+        # fold_dist_frac / fold_df_frac: position of the last round's result inside its search region (Legendre distance
+        # from the round's centre / half range; frequency offset / scan range); values near 1 at the final round mean
+        # the optimum may still lie outside. fold_rounds: search rounds this branch went through.
         cands.append(dict(period=1. / f0_new, dm=best['dm'], pb=pb_days, a1=tmpl[1], phi=phi_deg,
                           t0=pepoch + (phi_deg / 360.) * pb_days, snr=best['snr'],
-                          extra=dict(fold_width_bins=best['width'], fold_dfreq=best['dfreq'], fold_refined=best.get('refined', 0),
+                          extra=dict(fold_width_bins=best['width'], fold_dfreq=f0_new - 1. / float(p['period']), fold_refined=best.get('refined', 0),
+                                     fold_rounds=nround, fold_dist_frac=d_frac, fold_df_frac=f_frac,
                                      fold_snr_peak_template=best['snr_peak_template'], stage1_snr=p['snr'],
                                      stage1_period=p['period'], fold_nsub=best['nsub'])))
-        logging.info("peak %d/%d: f0 %.6f stage-1 S/N %s -> fold S/N %.2f (peak template %.2f), width %d bins, df %.2e Hz, DM %.3f, nsub %d (99%% drift %.2f bins)",
-                     ip + 1, len(peaks), f0, p['snr'], best['snr'], best['snr_peak_template'], best['width'], best['dfreq'], best['dm'], best['nsub'], best['drift'])
+        logging.info("candidate %d/%d (from peak %d, %d round(s)): f0 %.6f stage-1 S/N %s -> fold S/N %.2f, width %d bins, DM %.3f, nsub %d, position in the last region %.2f / %.2f",
+                     k + 1, len(results), ip0 + 1, nround, f0_new, p['snr'], best['snr'], best['width'], best['dm'], best['nsub'], d_frac, f_frac)
+    if results and args.resampler and args.gpu_fold:
+        dfr = np.array([r[4] for r in results]); rr = np.array([r[3] for r in results])
+        logging.info("%d stage-1 peaks -> %d candidates after %d round(s); rounds per candidate: median %d, max %d; "
+                     "final position / half range median %.2f, %d still beyond %.2f",
+                     len(peaks0), len(results), int(rr.max()), int(np.median(rr)), int(rr.max()), np.median(dfr), int((dfr > args.edge_frac).sum()), args.edge_frac)
     write_peasoup_like_xml(args.reference_xml, args.output, cands, ntemplates_total)
     logging.info("wrote %s with %d candidates (%d template evaluations + %d in the local refinement)", args.output, len(cands),
                  ntemplates_total, ntemplates_extra[0])
@@ -1581,6 +1658,13 @@ def main():
                          'width in turns, i.e. about 0.5 * width_bins / nbins (default 0.05)')
     pf.add_argument('--dm_trials', type=int, default=1, help='number of nearest DM trials folded per peak')
     pf.add_argument('--order_highest', type=int, default=10)
+    pf.add_argument('--f0tol_fac', type=float, default=0.01, help='clustering between rounds: down-weighting of the spin-frequency axis')
+    pf.add_argument('--distance_tol', type=float, default=5.0, help='clustering between rounds: radius in units of sqrt(nominal_mismatch)')
+    pf.add_argument('--min_prominence', type=float, default=1.0, help='clustering between rounds: prominence rule (see cluster)')
+    pf.add_argument('--max_rounds', type=int, default=5, help='search rounds: a branch whose result lies near the edge of its region is re-centred and searched again (1 = single search)')
+    pf.add_argument('--grow_halfrange', type=float, default=1.0,
+                    help='factor by which the search half range grows per round for the drifting branches (1 = constant)')
+    pf.add_argument('--edge_frac', type=float, default=0.9, help='a result farther than this fraction of the half range (or of the frequency scan range) from the centre continues to the next round')
     pf.add_argument('--nominal_mismatch', type=float, default=None)
     pf.add_argument('--template_bank', default=None)
     pf.add_argument('--search_halfrange_fac', type=float, default=0.6)

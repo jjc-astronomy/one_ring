@@ -786,6 +786,8 @@ process hierarchical_fold_search {
         --nbins ${fd.nbins} --ducy_max ${fd.ducy_max} \\
         --f0_halfrange_bins ${fd.f0_halfrange_bins} --f0_step_bins ${fd.f0_step_bins} \\
         --dm_trials ${fd.dm_trials} --refine_iter ${fd.refine_iter == null ? 3 : fd.refine_iter} \\
+        --max_rounds ${fd.max_rounds ?: 5} --edge_frac ${fd.edge_frac ?: 0.9} \\
+        --f0tol_fac ${hs.f0tol_fac} --distance_tol ${hs.distance_tol} --min_prominence ${hs.min_prominence} \\
         --order_highest ${hs.order_highest} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} --search_stepsize_fac ${hs.search_stepsize_fac} \\
         --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\

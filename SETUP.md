@@ -147,13 +147,24 @@ and search segment:
    is then refined iteratively (`fold.refine_iter`): parabolic steps along the eigen-directions of
    the local metric, starting at half the grid step and halving every iteration, 7 GPU evaluations
    per peak and iteration batched over all peaks of a DM trial, which removes most of the residual
-   phase drift left by the grid (J1807-2459A: 0.14 -> 0.02 cycles peak to peak, S/N 300 -> 325). Nearest-neighbour resampling
+   phase drift left by the grid (J1807-2459A: 0.14 -> 0.02 cycles peak to peak, S/N 300 -> 325).
+   Every stage-2 candidate carries diagnostic fields in the XML: `fold_dist_frac`, the Legendre
+   distance of the final template from its stage-1 peak as a fraction of the search half range, and
+   `fold_df_frac`, the frequency offset found as a fraction of the scan range; values near 1 mean the
+   optimum may lie outside the search region (the fold-search log summarises how many peaks are
+   beyond 0.9). Also `fold_dist_rad`, `fold_dfreq`, `fold_width_bins`, `fold_refined`, `fold_nsub`,
+   `fold_snr_peak_template`, `stage1_snr` and `stage1_period`. Nearest-neighbour resampling
    (`fold.resampler_mode`) keeps the noise of neighbouring bins independent; interpolating
    resamplers bias the boxcar S/N when the profile has more bins than samples per period.
    With `fold.method = "rotate"` only the peak template is resampled and the lattice is
    searched by rotating the sub-integration profiles, which is approximate for far templates and
-   needs the automatic `nsub`. The peaks are split into jobs of `fold.peaks_per_job`, run on GPU
-   nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
+   needs the automatic `nsub`. The search is iterative (`fold.max_rounds`, `fold.edge_frac`): a peak
+   whose best template lies near the edge of its search region has its optimum outside it, so its
+   branch is re-centred on that result and searched again; after every round all branches are
+   clustered in spin-frequency and Legendre-coefficient space (`distance_tol`, `f0tol_fac`,
+   `min_prominence`), so the branches of one bright pulsar that converge to the same orbit merge.
+   The XML records `fold_rounds` per candidate. The peaks are split into jobs of
+   `fold.peaks_per_job`, run on GPU nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
 5. merges the stage-2 chunk results into a single XML file, clustered again (in spin frequency and
    Legendre-coefficient space) if `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
    for this fold come from `hierarchical_search.folding_configuration` (same syntax as
