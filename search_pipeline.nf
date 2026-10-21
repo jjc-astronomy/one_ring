@@ -168,8 +168,8 @@ workflow {
      * 2. generate_fine_template_bank clusters the candidates in Legendre-coefficient space and keeps the
      *    S/N peaks (clustered_peaks.csv); the fine lattice around every peak is regenerated in stage 2.
      * 3. hierarchical_fold_search (stage 2): the dedispersed time series dumped by stage 1 are resampled
-     *    and folded on the GPU for every fine-lattice template of every peak (hs.fold.peaks_per_job peaks
-     *    per job). The DM range of a group is the union of the stage-1 DM ranges.
+     *    and folded on the GPU for every fine-lattice template of every peak, one job per dumped DM
+     *    trial. The DM range of a group is the union of the stage-1 DM ranges.
      * 4. Optionally (merge_stage2 == 1) the stage-2 job results are merged into a single XML file
      *    (clustered again if cluster_stage2 == 1), which is what gets folded.
      *
@@ -266,9 +266,8 @@ workflow {
         /*
          * Stage 2 by folding (LOKI scheme): the dumped time series of the group's DM trials are folded with
          * the peak's orbit into sub-integrations, which are then aligned per fine-lattice template.
-         * The peaks of a group are split into jobs of hs.fold.peaks_per_job peaks.
+         * One job per dumped time series (DM trial) of the group.
          */
-        def peaks_per_job = (hs.fold?.peaks_per_job ?: 100) as int
 
         // time series of one filterbank + segment: all its DM ranges (one dumping job each)
         timeseries_groups = peasoup.out.timeseries
@@ -280,17 +279,27 @@ workflow {
             .groupTuple(by: 0)
             .map { key, lists -> tuple(key.toString(), lists.flatten()) }
 
+        // one stage-2 job per dumped time series (DM trial): the job takes every peak whose nearest DM trial is
+        // that series, so that all branches of a signal at one DM drift and merge within the job
         fold_jobs = fine_peaks
-            .flatMap { meta, peaks_csv, summary_json, reference_xml, output_dp, output_dp_id, publish_dir ->
-                def summary = new groovy.json.JsonSlurper().parse(summary_json.toFile())
-                def npeaks = (summary.npeaks ?: 0) as int
-                def nchunks = Math.max(1, (int) Math.ceil(npeaks / (double) peaks_per_job))
+            .map { meta, peaks_csv, summary_json, reference_xml, output_dp, output_dp_id, publish_dir ->
                 def key = [meta.utc_start, meta.beam_id, meta.filstr, segKey(meta.stage1_program_args)].join('|')
-                (0..<nchunks).collect { chunk -> tuple(key, meta, peaks_csv, reference_xml, chunk, nchunks, output_dp_id) }
+                tuple(key, meta, peaks_csv, reference_xml, output_dp_id)
+            }
+            .combine(timeseries_groups, by: 0)
+            .flatMap { key, meta, peaks_csv, reference_xml, peaks_dp_id, ts_files ->
+                def dats = ts_files.findAll { it.toString().endsWith('.dat') }.sort { it.toString() }
+                def dmOf = { f -> def m = (f.toString() =~ /_DM(\d+\.\d+)\.dat$/); m ? m[0][1] : null }
+                def dm_list = dats.collect { dmOf(it) }.findAll { it != null }.join(' ')
+                dats.collect { dat ->
+                    def dm = dmOf(dat)
+                    def stem = dat.toString().replaceAll(/\.dat$/, '')
+                    def files = ts_files.findAll { it.toString() == dat.toString() || it.toString() == stem + '.inf' }
+                    tuple(key, meta, peaks_csv, reference_xml, dm, dm_list, dats.size(), peaks_dp_id, files)
+                }
             }
         stage2_input = fold_jobs
-            .combine(timeseries_groups, by: 0)
-            .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id, ts_files ->
+            .map { key, meta, peaks_csv, reference_xml, dm, dm_list, njobs, peaks_dp_id, ts_files ->
                 [
                     program_name : 'hierarchical_fold_search',
                     pipeline_id  : params.pipeline_id,
@@ -300,9 +309,9 @@ workflow {
                     input_dp_id  : peaks_dp_id.toString().split(/\s+/)[0],
                     output_dp    : 'output.xml',
                     meta         : meta,
-                    cfg_name     : "${meta.cfg_hier}/fold_ck${String.format('%03d', chunk)}".toString(),
-                    chunk        : chunk,
-                    nchunks      : nchunks,
+                    cfg_name     : "${meta.cfg_hier}/fold_dm${dm}".toString(),
+                    dm_select    : dm,
+                    dm_list      : dm_list,
                     peaks_csv    : peaks_csv,
                     reference_xml: reference_xml,
                     timeseries   : ts_files
@@ -310,8 +319,8 @@ workflow {
             }
         stage2_output = hierarchical_fold_search(stage2_input)
         stage2_nchunks = fold_jobs
-            .map { key, meta, peaks_csv, reference_xml, chunk, nchunks, peaks_dp_id ->
-                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), nchunks)
+            .map { key, meta, peaks_csv, reference_xml, dm, dm_list, njobs, peaks_dp_id, ts_files ->
+                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), njobs)
             }
             .unique()
 

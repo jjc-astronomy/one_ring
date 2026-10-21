@@ -727,11 +727,11 @@ process hierarchical_fold_search {
           val(output_dp),
           val(meta),
           val(cfg_name),
-          val(chunk),
-          val(nchunks),
+          val(dm_select),
+          val(dm_list),
           path(peaks_csv),
           path(reference_xml),
-          path(timeseries, stageAs: 'ts_?????/*')   // one directory per file: DM trials of adjacent ranges may share a name
+          path(timeseries, stageAs: 'ts_?????/*')   // the .dat and .inf of this job's DM trial
 
     output:
     // Same shape as the peasoup process output so that the merge and folding stages consume it unchanged.
@@ -774,20 +774,19 @@ process hierarchical_fold_search {
         cp -L "\${dat}" "series/\$(printf %03d \${i})_\${stem}.dat"
         cp -L "\${inf}" "series/\$(printf %03d \${i})_\${stem}.inf"
     done
-    echo "Stage-2 fold search, peaks chunk ${chunk} of ${nchunks}, time series:"
+    echo "Stage-2 fold search of the DM trial ${dm_select} (dumped DM trials: ${dm_list}), time series:"
     ls -v series/*.dat
 
     python ${hs.script} foldsearch \\
         --peaks ${peaks_csv} \\
         --timeseries series/*.dat \\
         --reference_xml ${reference_xml} \\
-        --chunk ${chunk} --nchunks ${nchunks} --only_used \\
+        --dm_select ${dm_select} --dm_list ${dm_list} --only_used \\
         --nsub ${fd.nsub} --max_phase_drift_bins ${fd.max_phase_drift_bins} --nsub_max ${fd.nsub_max} \\
         --nbins ${fd.nbins} --ducy_max ${fd.ducy_max} \\
         --f0_halfrange_bins ${fd.f0_halfrange_bins} --f0_step_bins ${fd.f0_step_bins} \\
         --dm_trials ${fd.dm_trials} --refine_iter ${fd.refine_iter == null ? 3 : fd.refine_iter} \\
         --max_rounds ${fd.max_rounds ?: 5} --edge_frac ${fd.edge_frac ?: 0.9} \\
-        --grow_halfrange ${fd.grow_halfrange ?: 2} --max_halfrange_fac ${fd.max_halfrange_fac ?: 4} \\
         --drift_snr_ratio ${fd.drift_snr_ratio == null ? 1.5 : fd.drift_snr_ratio} --drift_fdiff ${fd.drift_fdiff ?: 3e-3} --drift_dm_tol ${fd.drift_dm_tol ?: 1.5} \\
         --f0tol_fac ${hs.f0tol_fac} --distance_tol ${hs.distance_tol} --min_prominence ${hs.min_prominence} \\
         --order_highest ${hs.order_highest} \\

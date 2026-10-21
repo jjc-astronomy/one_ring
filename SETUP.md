@@ -164,13 +164,16 @@ and search segment:
    With `fold.method = "rotate"` only the peak template is resampled and the lattice is
    searched by rotating the sub-integration profiles, which is approximate for far templates and
    needs the automatic `nsub`. The search is iterative (`fold.max_rounds`, `fold.edge_frac`): a peak
-   whose best template lies near the edge of its search region has its optimum outside it, so its
-   branch is re-centred on that result and searched again; after every round all branches are
+   whose best template lies beyond `edge_frac` of its search ball (or of the frequency scan) has its
+   optimum outside it, so its branch is re-centred on that result and searched again; a best well
+   inside the ball halts the drift and waits for the refinement, and a branch that returns to a
+   centre it has already searched stops there; after every round all branches are
    clustered in spin-frequency and Legendre-coefficient space (`distance_tol`, `f0tol_fac`,
    `min_prominence`), so the branches of one bright pulsar that converge to the same orbit merge.
-   The XML records `fold_rounds` per candidate. The region of a drifting branch doubles every
-   round (`fold.grow_halfrange`, capped by `fold.max_halfrange_fac`; the lattice samples follow the
-   volume), and a branch that stops at a local maximum
+   The XML records `fold_rounds` per candidate. The search ball keeps its size: a branch moves by
+   re-centring only. A branch whose best template is its own centre at zero frequency offset sits
+   on a local maximum, is not folded again and waits in the finished list for the refinement; a
+   branch that stops at a local maximum
    keeps drifting while a candidate at the same frequency and DM is much brighter
    (`fold.drift_snr_ratio`, `drift_fdiff`, `drift_dm_tol`): such a branch is an alias of that signal.
    The lattice of the `sample` type is built by inverting the three leading coefficients of every
@@ -180,9 +183,9 @@ and search segment:
    phase and the norm gives a1. One root per interval is one orbit per sheet of the folded orbit
    manifold, with no starting point and no iteration; for 60 min segments and Pb >= 1.5 h the whole
    range lies below the first zero of j2, so the map is one-to-one. On the 12 stage-1 peaks of
-   J1807-2459A in one DM trial this merges all branches into the single true solution (fold S/N
-   325, 4 rounds, 415 s, against 55 s for one round). The peaks are split into jobs of
-   `fold.peaks_per_job`, run on GPU nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
+   J1807-2459A in one DM trial this takes 102 s (against 55 s for one round). There is one job per dumped
+   DM trial: it takes every peak whose nearest dumped DM is that trial, so that all branches of a
+   signal at one DM drift and merge within the job; the jobs run on GPU nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
 5. merges the stage-2 chunk results into a single XML file, clustered again (in spin frequency and
    Legendre-coefficient space) if `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
    for this fold come from `hierarchical_search.folding_configuration` (same syntax as
