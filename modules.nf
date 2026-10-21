@@ -787,6 +787,8 @@ process hierarchical_fold_search {
         --f0_halfrange_bins ${fd.f0_halfrange_bins} --f0_step_bins ${fd.f0_step_bins} \\
         --dm_trials ${fd.dm_trials} --refine_iter ${fd.refine_iter == null ? 3 : fd.refine_iter} \\
         --max_rounds ${fd.max_rounds ?: 5} --edge_frac ${fd.edge_frac ?: 0.9} \\
+        --grow_halfrange ${fd.grow_halfrange ?: 2} --max_halfrange_fac ${fd.max_halfrange_fac ?: 4} \\
+        --drift_snr_ratio ${fd.drift_snr_ratio == null ? 1.5 : fd.drift_snr_ratio} --drift_fdiff ${fd.drift_fdiff ?: 3e-3} --drift_dm_tol ${fd.drift_dm_tol ?: 1.5} \\
         --f0tol_fac ${hs.f0tol_fac} --distance_tol ${hs.distance_tol} --min_prominence ${hs.min_prominence} \\
         --order_highest ${hs.order_highest} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} --search_stepsize_fac ${hs.search_stepsize_fac} \\

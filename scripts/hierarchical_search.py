@@ -613,9 +613,13 @@ def cmd_cluster(args):
         # the region of a peak is sized at the peak's own spin frequency (the highest among the peaks of the template)
         f_center = np.zeros(len(centers))
         np.maximum.at(f_center, peak_center, 1. / peaks['period'])
-        templates, owner = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                          nlead=args.sample_nlead, nsamples=args.sample_n, workers=args.workers,
-                                          pb_bounds=(bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None)
+        pbb = (bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None
+        if args.sample_nlead == 3:
+            templates, owner = all_roots_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                                 nsamples=args.sample_n, pb_bounds=pbb)
+        else:
+            templates, owner = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                              nlead=args.sample_nlead, nsamples=args.sample_n, workers=args.workers, pb_bounds=pbb)
     else:
         metrics = circular_metric(centers, freq_max, tobs, args.order_highest)
         templates, owner = eigen_lattice(centers, metrics, halfrange, stepsize)
@@ -793,8 +797,66 @@ def _single_threaded_blas():
         pass
 
 
+def all_roots_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, nsamples=2000, pb_bounds=None,
+                      a1_bounds=(1e-4, 50.), n_omega=4000, seed=0):
+    """
+    Fine grid by sampling the three leading Legendre coefficients and inverting every sample in closed form.
+    With a2 = sqrt5 r j2(s) sin p, a3 = sqrt7 r j3(s) cos p and a4 = -3 r j4(s) sin p (s = omega T/2, r = 2 pi f a1,
+    p = s - phi), the ratio a4/a2 = -(3/sqrt5) j4(s)/j2(s) depends on s alone. g(s) = j4/j2 is positive and monotone
+    between consecutive zeros of j2 (5.763, 9.095, ...; the first zero of j4 is at 8.183), so on every pole-free
+    interval of the bank's period range a target has at most one orbit, obtained by interpolating the tabulated g;
+    a3 then gives p and the norm gives r. One root per interval = one orbit per sheet of the orbit manifold, no
+    starting point and no iteration. The full coefficient vector of every orbit is checked against the ball and
+    the result is pruned in coefficient space to 'stepsize'. Returns (templates, owner) like eigen_lattice.
+    """
+    rng = np.random.default_rng(seed)
+    cen = np.atleast_2d(centers); ncen = len(cen)
+    freq_cen = np.broadcast_to(np.asarray(freq_max, dtype=np.float64), (ncen,))
+    pb_lo, pb_hi = (pb_bounds if pb_bounds else (0.5 * 3600., 50. * 3600.))
+    s_lo, s_hi = np.pi * tobs / (pb_hi * 2.), np.pi * tobs / (pb_lo / 2.)       # s = omega T / 2 over the period range (x2 margin)
+    # monotone pieces of g(s) = j4/j2 between the zeros of j2 (poles of g)
+    j2_zeros = np.array([5.763459, 9.095011, 12.322941, 15.514603, 18.689036, 21.853874, 25.012803])
+    edges = np.concatenate([[s_lo], j2_zeros[(j2_zeros > s_lo) & (j2_zeros < s_hi)], [s_hi]])
+    pieces = []
+    for a, b in zip(edges[:-1], edges[1:]):
+        sg = np.linspace(a, b, n_omega)[1:-1]                 # open interval: no evaluation at the poles
+        g = spherical_jn(4, sg) / spherical_jn(2, sg)
+        order_ = np.argsort(g)                                # g may be increasing or decreasing on a piece
+        pieces.append((sg[order_], g[order_]))
+    out_par, out_owner = [], []
+    for k in range(ncen):
+        f0 = freq_cen[k]
+        an_c = orbital_an(cen[k][None, :], f0, tobs, order_highest)[0]
+        gg = rng.normal(size=(nsamples, 3)); gg /= np.linalg.norm(gg, axis=1)[:, None]
+        tgt = an_c[:3] + gg * halfrange * rng.random(nsamples)[:, None] ** (1. / 3.)
+        a2, a3, a4 = tgt[:, 0], tgt[:, 1], tgt[:, 2]
+        good = np.abs(a2) > 1e-9 * np.abs(an_c[0])
+        kappa = np.full(nsamples, np.nan); kappa[good] = -np.sqrt(5.) * a4[good] / (3. * a2[good])
+        orbs = []
+        for sg, g in pieces:
+            inside = good & (kappa >= g[0]) & (kappa <= g[-1])
+            if not inside.any():
+                continue
+            s_root = np.interp(kappa[inside], g, sg)
+            A = a2[inside] / (np.sqrt(5.) * spherical_jn(2, s_root)); B = a3[inside] / (np.sqrt(7.) * spherical_jn(3, s_root))
+            r = np.sqrt(A ** 2 + B ** 2); pp = np.arctan2(A, B)
+            om = 2. * s_root / tobs
+            orbs.append(np.column_stack([om, r / (2 * np.pi * f0), np.mod(s_root - pp, 2 * np.pi)]))
+        if not orbs:
+            out_par.append(cen[k][None, :]); out_owner.append(np.array([k])); continue
+        orb = np.concatenate(orbs)
+        ok = (orb[:, 1] > a1_bounds[0]) & (orb[:, 1] < a1_bounds[1])
+        orb = orb[ok]
+        an = orbital_an(orb, f0, tobs, order_highest); dist = np.linalg.norm(an - an_c, axis=1)
+        inside = dist <= halfrange
+        orb, an, dist = orb[inside], an[inside], dist[inside]
+        order_ = np.argsort(dist, kind='stable')
+        keep = order_[_greedy_thin(an[order_], stepsize)] if len(orb) else np.zeros(0, dtype=int)
+        out_par.append(np.concatenate([cen[k][None, :], orb[keep]])); out_owner.append(np.full(1 + len(keep), k))
+    return np.concatenate(out_par), np.concatenate(out_owner)
+
 def sample_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, nlead=3, nsamples=2000, iters=40,
-                   pb_bounds=None, a1_bounds=(1e-4, 50.), batch_rows=400000, seed=0, workers=1):
+                   pb_bounds=None, a1_bounds=(1e-4, 50.), batch_rows=400000, seed=0, workers=1, starts=None):
     """
     Fine grid by sampling the leading Legendre coefficients.
 
@@ -807,6 +869,10 @@ def sample_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, 
     from the solved orbit; solutions outside the full ball or not converged are dropped, and the rest is pruned in
     coefficient space so that no two templates are closer than 'stepsize' (inner points first). The number of
     templates is set by the 3-D volume of the region, not by the expansion order.
+    With 'starts' (an (S, 3) array of orbits) every target is solved from the centre and from each of these starting
+    points as well: the inverse of the leading coefficients is multi-valued (several orbits share the same leading
+    coefficients), and a solver started on the centre's sheet of the orbit manifold stays there; the extra starts
+    reach the other sheets inside the ball. Duplicate solutions are removed by the pruning.
     Returns (templates, owner) like eigen_lattice.
     """
     rng = np.random.default_rng(seed)
@@ -834,7 +900,13 @@ def sample_lattice(centers, freq_max, tobs, order_highest, halfrange, stepsize, 
         owner = np.repeat(idx, nsamples)
         g = rng.normal(size=(len(owner), K)); g /= np.linalg.norm(g, axis=1)[:, None]
         target = an_cen[owner, :K] + g * halfrange * rng.random(len(owner))[:, None] ** (1. / K)
-        u = u_cen[owner].copy(); lam = np.full(len(owner), 1e-2); fq = freq_cen[owner]
+        u = u_cen[owner].copy()
+        if starts is not None and len(starts):
+            st = np.atleast_2d(starts)
+            u_st = np.column_stack([np.log(st[:, 0]), np.log(st[:, 1]), st[:, 2]]) + off
+            owner = np.concatenate([owner] + [owner] * len(st)); target = np.concatenate([target] + [target] * len(st))
+            u = np.concatenate([u] + [np.tile(us, (len(target) // (len(st) + 1), 1)) for us in u_st])
+        lam = np.full(len(owner), 1e-2); fq = freq_cen[owner]
         an, jac = an_jac_log(u, fq, tobs, order_highest, off); res = an[:, :K] - target; cost = (res ** 2).sum(1)
         for _ in range(iters):
             J = jac[:, :K, :]
@@ -1015,25 +1087,64 @@ def boxcar_snr(profiles, widths, stdnoise=1.0):
     return best, best_w
 
 
-def template_shifts(templates, f0, peak_template, t_sub, dfreq=0.0, detrend=True):
+def template_shifts(templates, f0, peak_template, t_sub, dfreq=0.0, detrend=True, slope=None):
     """
     Residual phase (turns) of every template relative to the fold model at the sub-integration centres:
     delta(t) = f0 * (R_peak(t) - R_template(t)) + dfreq * t.  Shape (ntemplates, nsub).
 
-    With detrend=True the linear part c0 + c1*t of f0 * (R_peak - R_template) is removed and c1 is returned.
-    A stage-1 FFT candidate found with the peak template reports f_obs = f_true + c1(true template), so after
-    detrending the grid offset needed for the true template is only the FFT quantisation, and the frequency
+    With detrend=True the linear part c0 + c1*t of f0 * (R_peak - R_template) is removed and c1 is returned;
+    with 'slope' given, that frequency offset (from fft_frequency_offsets) is removed instead of the least-squares
+    line. A stage-1 FFT candidate found with the peak template reports f_obs = f_true + c1(true template), so
+    after detrending the grid offset needed for the true template is only the FFT quantisation, and the frequency
     implied by a template at grid offset dfreq is f0 + dfreq - c1. Returns (shifts, slope).
     """
     r_peak = circular_delay(t_sub, peak_template)                                   # (nsub,)
     r_tmpl = templates[:, 1:2] * np.sin(templates[:, 0:1] * t_sub[None, :] - templates[:, 2:3])   # (T, nsub)
     resid = f0 * (r_peak[None, :] - r_tmpl)
-    slope = np.zeros(len(templates))
+    if slope is None:
+        slope = np.zeros(len(templates))
+        if detrend:
+            tc = t_sub - t_sub.mean()
+            slope = (resid - resid.mean(axis=1, keepdims=True)) @ tc / (tc @ tc)
     if detrend:
-        tc = t_sub - t_sub.mean()
-        slope = (resid - resid.mean(axis=1, keepdims=True)) @ tc / (tc @ tc)
-        resid = resid - resid.mean(axis=1, keepdims=True) - slope[:, None] * tc[None, :]
+        resid = resid - slope[:, None] * t_sub[None, :]
+        resid = resid - resid.mean(axis=1, keepdims=True)
     return resid + np.asarray(dfreq)[..., None] * t_sub[None, :], slope
+
+
+def fft_frequency_offsets(templates, f0, peak_template, tobs, nsamp=512, pad=16, chunk=2048):
+    """
+    Frequency offset (Hz) at which an FFT search finds a signal whose orbit is 'template' when the series was
+    resampled with 'peak_template' (Jiang et al.: the peak of |FFT exp(i delta_phi)| of the residual orbital
+    phase delta_phi = 2 pi f0 (R_peak - R_template)), per template. The linear term alone (the n = 1 Legendre
+    coefficient) is wrong by several bins once the residual phase exceeds a radian, which is the case for every
+    partial-match and alias peak; the FFT peak reproduces the stage-1 frequency to the interbinning quantisation
+    whatever the distance. The linear term is removed first so that a short time grid suffices, then the FFT of
+    the non-linear remainder is zero-padded 'pad' times and the maximum is interpolated parabolically.
+    """
+    t = np.linspace(0, tobs, nsamp, endpoint=False)
+    tc = t - t.mean()
+    r_peak = circular_delay(t, peak_template)
+    out = np.empty(len(templates))
+    nfft = nsamp * pad
+    fr = np.fft.fftfreq(nfft, tobs / nsamp)
+    for i0 in range(0, len(templates), chunk):
+        tm = templates[i0:i0 + chunk]
+        resid = f0 * (r_peak[None, :] - tm[:, 1:2] * np.sin(tm[:, 0:1] * t[None, :] - tm[:, 2:3]))
+        slope = (resid - resid.mean(axis=1, keepdims=True)) @ tc / (tc @ tc)
+        z = np.exp(2j * np.pi * (resid - slope[:, None] * t[None, :])).astype(np.complex64)
+        if HAVE_SCIPY:
+            from scipy.fft import fft as _fft
+            pw = np.abs(_fft(z, nfft, axis=1, workers=-1)) ** 2
+        else:
+            pw = np.abs(np.fft.fft(z, nfft, axis=1)) ** 2
+        k = np.argmax(pw, axis=1)
+        rows = np.arange(len(tm))
+        ym, y0, yp = pw[rows, (k - 1) % nfft], pw[rows, k], pw[rows, (k + 1) % nfft]
+        den = ym - 2 * y0 + yp
+        frac = np.where(den < 0, 0.5 * (ym - yp) / np.where(den < 0, den, 1.), 0.)
+        out[i0:i0 + chunk] = slope + (fr[k] + frac * fr[1])
+    return out
 
 
 def shift_add_score(E, N, shifts_turns, widths, batch=4096):
@@ -1182,7 +1293,8 @@ def fold_search_peak(ts, tsamp, f0, peak_template, templates, nsub, nbins, dfreq
         E, N, t_sub = fold_subints_resampled(ts, tsamp, f0, nsub, nbins)
     else:
         E, N, t_sub = fold_subints(ts, tsamp, f0, peak_template, nsub, nbins)
-    shifts0, slope = template_shifts(templates, f0, peak_template, t_sub, 0.0)
+    slope = fft_frequency_offsets(templates, f0, peak_template, float(t_sub[-1] + t_sub[0]))
+    shifts0, _ = template_shifts(templates, f0, peak_template, t_sub, 0.0, slope=slope)
     best = None
     for df in dfreqs:
         shifts = shifts0 + df * t_sub[None, :]
@@ -1261,10 +1373,39 @@ def cmd_foldsearch(args):
         tobs = args.tobs
     pepoch = ref_info['segment_pepoch']
     halfrange = args.search_halfrange_fac * np.sqrt(args.nominal_mismatch)
+    halfrange0 = halfrange
     stepsize = args.search_stepsize_fac * np.sqrt(args.nominal_mismatch)
     freq_max = 1. / args.period_min
     widths = box_widths(args.nbins, args.ducy_max)
     dfreqs = np.arange(-args.f0_halfrange_bins, args.f0_halfrange_bins + 1e-9, args.f0_step_bins) / tobs
+
+    # Stage-1 template bank as a global sample of the orbit manifold: its templates inside the (grown) ball of a
+    # drifting branch are starting points on the other sheets (see sample_lattice). Coefficients at a reference
+    # frequency; they scale linearly with frequency.
+    bank_tree, bank_tmpl, f_bank = None, None, freq_max
+    if args.bank_seeds and HAVE_SCIPY:
+        bank_path = getattr(args, 'template_bank', None) or bank_header_from_xml(args.reference_xml)[0]
+        if bank_path and os.path.exists(bank_path):
+            import glob as _glob, re as _re
+            files = sorted(_glob.glob(_re.sub(r'_ck\d+', '_ck*', bank_path))) or [bank_path]
+            bank_tmpl = np.concatenate([np.loadtxt(f, comments='#', usecols=(0, 1, 2), ndmin=2) for f in files])
+            an_bank = orbital_an(bank_tmpl, f_bank, tobs, args.order_highest).astype(np.float32)
+            bank_tree = scipy.spatial.cKDTree(an_bank)
+            logging.info("bank seeds: %d templates from %d file(s), coefficients at %.0f Hz", len(bank_tmpl), len(files), f_bank)
+        else:
+            logging.warning("bank seeds requested but no template bank file found (%s)", bank_path)
+
+    def bank_seeds_in_ball(centre, f_center, radius):
+        """Bank templates whose coefficients (at f_center) lie within 'radius' of the centre's, excluding the centre itself."""
+        if bank_tree is None:
+            return None
+        q = orbital_an(centre[None, :], f_bank, tobs, args.order_highest)[0].astype(np.float32)
+        idx = bank_tree.query_ball_point(q, r=radius * f_bank / f_center)
+        if not idx:
+            return None
+        seeds = bank_tmpl[idx]
+        far = np.linalg.norm(np.log(seeds[:, :2]) - np.log(centre[None, :2]), axis=1) > 1e-6
+        return seeds[far] if far.any() else None
 
     # Per peak: fold frequency, orbital template, DM trials used
     peaks0 = list(peaks)
@@ -1289,9 +1430,19 @@ def cmd_foldsearch(args):
                 lattices[iu], _ = adaptive_lattice(centers, freq_max, tobs, args.order_highest, halfrange, stepsize, refine=args.lattice_refine)
             elif args.lattice == 'sample':
                 f_center = max(float(peak_f0[ip]) for ip in range(len(peaks)) if tmpl_of_peak[ip] == iu)
-                lattices[iu], _ = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                                 nlead=args.sample_nlead, nsamples=args.sample_n,
-                                                 pb_bounds=(bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None)
+                # the number of samples follows the volume of the ball (grown balls of drifting branches)
+                nsamp = int(round(args.sample_n * (halfrange / halfrange0) ** 3))
+                pbb = (bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None
+                if args.sample_nlead == 3:
+                    # exhaustive inversion: every sheet of the orbit manifold inside the ball, no starting point needed
+                    lattices[iu], _ = all_roots_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                                        nsamples=nsamp, pb_bounds=pbb)
+                else:
+                    seeds = bank_seeds_in_ball(centers[0], f_center, halfrange) if (args.bank_seeds and halfrange > halfrange0 * 1.001) else None
+                    lattices[iu], _ = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
+                                                     nlead=args.sample_nlead, nsamples=nsamp, starts=seeds, pb_bounds=pbb)
+                    if seeds is not None:
+                        lattices[iu] = np.concatenate([lattices[iu], seeds])
             else:
                 lattices[iu], _ = eigen_lattice(centers, circular_metric(centers, freq_max, tobs, args.order_highest), halfrange, stepsize)
             if not args.no_bank_clip and bank_hdr:
@@ -1323,17 +1474,18 @@ def cmd_foldsearch(args):
     def search_peak_gpu_fold(ip, dat, dm):
         """
         Exact variant: every lattice template is resampled and folded by the tool at its own frequency
-        f_obs - c1(template) (c1 = linear Doppler term of the template relative to the peak), so that only the
-        frequency grid remains to be searched on the folded profiles. No orbital phase approximation.
+        f_obs - c1(template) (c1 = FFT-peak offset of the template's residual phase relative to the peak), so that
+        only the frequency grid remains to be searched on the folded profiles. No orbital phase approximation.
         """
         templates = lattice_of(tmpl_of_peak[ip])
         f0 = peak_f0[ip]
-        t_fine = np.linspace(0, tobs, 1024)
-        _, slope = template_shifts(templates, f0, peak_tmpl[ip], t_fine, 0.0)
-        f0_fold = f0 - slope
-        nsub = args.nsub if args.nsub > 0 else int(2 ** np.ceil(np.log2(max(32, args.nbins * args.f0_halfrange_bins / args.max_phase_drift_bins))))
+        # fold every template at the frequency where the stage-1 FFT would have found it (exact to the
+        # interbinning quantisation whatever the distance from the centre, so the scan does not grow with the ball)
+        f0_fold = f0 - fft_frequency_offsets(templates, f0, peak_tmpl[ip], tobs)
+        f0_half = args.f0_halfrange_bins
+        nsub = args.nsub if args.nsub > 0 else int(2 ** np.ceil(np.log2(max(32, args.nbins * f0_half / args.max_phase_drift_bins))))
         snr, wid, df_bins = gpu_fold_search(args.resampler, dat, templates, f0_fold, nsub, args.nbins,
-                                            args.f0_halfrange_bins, args.f0_step_bins, args.ducy_max, args.resampler_mode)
+                                            f0_half, args.f0_step_bins, args.ducy_max, args.resampler_mode)
         df = df_bins / tobs
         i = int(np.argmax(snr))
         ipk = int(np.argmin(np.linalg.norm(templates - peak_tmpl[ip], axis=1)))   # the peak's own template
@@ -1361,8 +1513,8 @@ def cmd_foldsearch(args):
         snr_c = np.array([best_of_peak[ip]['snr'] for ip in ips]); wid_c = np.array([best_of_peak[ip]['width'] for ip in ips])
         h = 0.5 * stepsize
         nsub_r = max(nsub_of_peak[ip] for ip in ips) if any(nsub_of_peak[ip] for ip in ips) else (args.nsub if args.nsub > 0 else 256)
-        win, dstep = 2 * args.f0_step_bins, args.f0_step_bins / 4.
-        t_fine = np.linspace(0, tobs, 1024)
+        # the best grid trial is within half a search step of the optimum: bracket it with the fine refinement step
+        win, dstep = max(args.f0_step_bins, 4 * args.f0_refine_step_bins), args.f0_refine_step_bins
         for it in range(nit):
             logging.debug("refinement iteration %d/%d: orbital step h = %.3f rad (%.2f grid steps), frequency window +-%.2f bins at %.4f",
                           it + 1, nit, h, h / stepsize, win, dstep)
@@ -1375,7 +1527,7 @@ def cmd_foldsearch(args):
                 pts = np.array(pts)
                 bad = (pts[:, 0] <= 0) | (pts[:, 1] <= 0)
                 pts[bad] = c
-                _, slope = template_shifts(pts, f_c[k], c, t_fine, 0.0)
+                slope = fft_frequency_offsets(pts, f_c[k], c, tobs)
                 trials.append(pts); f_fold.append(f_c[k] - slope); owner += [k] * 7; axis += [(-1, 0)] + [(a, sg) for a in range(3) for sg in (+1, -1)]
             trials = np.concatenate(trials); f_fold = np.concatenate(f_fold); owner = np.array(owner)
             snr_t, wid_t, dfb_t = gpu_fold_search(args.resampler, dat, trials, f_fold, nsub_r, args.nbins, win, dstep, args.ducy_max, args.resampler_mode)
@@ -1394,10 +1546,9 @@ def cmd_foldsearch(args):
                 new_centres[k] = c + sum(delta[a] * dirs[k, :, a] for a in range(3))
                 if new_centres[k, 0] <= 0 or new_centres[k, 1] <= 0:
                     new_centres[k] = c
-                # frequency of the signal in the frame of the new centre: the centre's refined value, shifted by the linear term
+                # frequency of the signal in the frame of the new centre: the centre's refined value, shifted by the FFT-peak offset
                 f_here = f_fold[7 * k] + dfb_t[k, 0] / tobs
-                _, sl = template_shifts(new_centres[k][None, :], f_here, c, t_fine, 0.0)
-                f_c[k] = f_here - sl[0]
+                f_c[k] = f_here - fft_frequency_offsets(new_centres[k][None, :], f_here, c, tobs)[0]
                 # keep the best evaluated point of this iteration as the running result
                 j = int(np.argmax(snr_t[k]))
                 if snr_t[k, j] > snr_c[k]:
@@ -1432,10 +1583,9 @@ def cmd_foldsearch(args):
         origin = np.arange(n0)                      # stage-1 peak index of every active branch
         rounds = np.zeros(n0, dtype=int)
         finished = []                               # entries of 'results'
-        halfrange0 = halfrange
         for rnd in range(1, args.max_rounds + 1):
             # the region of a drifting branch grows every round (its optimum was out of reach in the previous one)
-            halfrange = halfrange0 * args.grow_halfrange ** (rnd - 1)
+            halfrange = halfrange0 * min(args.grow_halfrange ** (rnd - 1), args.max_halfrange_fac)
             lattices.clear(); work.clear()
             best_of_peak[:] = [None] * len(peaks); nsub_of_peak[:] = [0] * len(peaks)
             for ip in range(len(peaks)):
@@ -1453,9 +1603,20 @@ def cmd_foldsearch(args):
                                for ip in range(len(peaks))])
             f_frac = np.array([abs(best_of_peak[ip]['dfreq_grid']) * tobs / args.f0_halfrange_bins for ip in range(len(peaks))])
             drifting = (d_frac > args.edge_frac) | (f_frac > args.edge_frac)
-            # cluster all branches (finished ones included): branches that converged to the same solution merge
             cur = [(origin[ip], peak_f0[ip], best_of_peak[ip], rounds[ip] + 1, d_frac[ip], f_frac[ip]) for ip in range(len(peaks))]
             allb = finished + cur
+            if args.drift_snr_ratio > 0:
+                # A branch at a local maximum whose frequency (within the bank's Doppler range) and DM coincide with a
+                # much brighter branch is an alias of that signal: keep it drifting (with a growing ball) so that it
+                # can reach the brighter solution and be merged by the clustering. The merge itself is decided by the
+                # clustering in model space, this only decides where to keep searching.
+                fa = np.array([b[1] + b[2]['dfreq'] for b in allb]); sa = np.array([b[2]['snr'] for b in allb]); dma = np.array([b[2]['dm'] for b in allb])
+                for ip in range(len(peaks)):
+                    k = len(finished) + ip
+                    near = (np.abs(fa / fa[k] - 1.) < args.drift_fdiff) & (np.abs(dma - dma[k]) <= args.drift_dm_tol)
+                    if np.any(near & (sa >= args.drift_snr_ratio * sa[k])):
+                        drifting[ip] = True
+            # cluster all branches (finished ones included): branches that converged to the same solution merge
             arr = dict(period=np.array([1. / (b[1] + b[2]['dfreq']) for b in allb]),
                        template=np.array([b[2]['template'] for b in allb]).reshape(-1, 3),
                        snr=np.array([b[2]['snr'] for b in allb]))
@@ -1600,7 +1761,7 @@ def main():
                          'that re-evaluates the metric layer by layer and measures every distance in Legendre-coefficient '
                          'space (follows the curved valleys that connect aliased orbits)')
     pc.add_argument('--sample_nlead', type=int, default=3, help='sample lattice: leading orders sampled (default 3, exactly determined)')
-    pc.add_argument('--sample_n', type=int, default=2000, help='sample lattice: samples per peak before pruning (default 2000)')
+    pc.add_argument('--sample_n', type=int, default=4000, help='sample lattice: samples per peak before pruning (default 4000)')
     pc.add_argument('--lattice_refine', type=int, default=1,
                     help='adaptive lattice only: advance the front with a step stepsize/refine and prune the result in '
                          'Legendre space to the step size (1 = off)')
@@ -1649,21 +1810,35 @@ def main():
     pf.add_argument('--nsub_max', type=int, default=1024)
     pf.add_argument('--nbins', type=int, default=64, help='profile bins (default 64)')
     pf.add_argument('--ducy_max', type=float, default=0.3, help='largest boxcar width as a fraction of the profile')
-    pf.add_argument('--f0_halfrange_bins', type=float, default=0.6,
-                    help='frequency offsets searched around every template, in Fourier bins (1/tobs); the linear '
-                         'phase term of each template is removed analytically, so this only has to cover the FFT '
-                         'quantisation of the stage-1 frequency (default 0.6)')
+    pf.add_argument('--f0_halfrange_bins', type=float, default=1.5,
+                    help='frequency offsets searched around every template, in Fourier bins (1/tobs); every template '
+                         'is folded at the frequency where the stage-1 FFT finds it (peak of the FFT of its residual '
+                         'orbital phase), so this only has to cover the interbinning quantisation of the stage-1 '
+                         'frequency, independent of the distance from the centre (default 1.5)')
     pf.add_argument('--f0_step_bins', type=float, default=0.05,
                     help='step of the frequency offsets in Fourier bins; must be a fraction of the narrowest pulse '
                          'width in turns, i.e. about 0.5 * width_bins / nbins (default 0.05)')
+    pf.add_argument('--f0_refine_step_bins', type=float, default=0.025,
+                    help='step of the frequency offsets in the final refinement, in Fourier bins; the refinement '
+                         'window is +-max(f0_step_bins, 4 * this) around the best grid trial (default 0.025)')
     pf.add_argument('--dm_trials', type=int, default=1, help='number of nearest DM trials folded per peak')
     pf.add_argument('--order_highest', type=int, default=10)
     pf.add_argument('--f0tol_fac', type=float, default=0.01, help='clustering between rounds: down-weighting of the spin-frequency axis')
     pf.add_argument('--distance_tol', type=float, default=5.0, help='clustering between rounds: radius in units of sqrt(nominal_mismatch)')
     pf.add_argument('--min_prominence', type=float, default=1.0, help='clustering between rounds: prominence rule (see cluster)')
-    pf.add_argument('--max_rounds', type=int, default=5, help='search rounds: a branch whose result lies near the edge of its region is re-centred and searched again (1 = single search)')
-    pf.add_argument('--grow_halfrange', type=float, default=1.0,
-                    help='factor by which the search half range grows per round for the drifting branches (1 = constant)')
+    pf.add_argument('--max_rounds', type=int, default=20, help='search rounds: a branch whose result lies near the edge of its region is re-centred and searched again (1 = single search)')
+    pf.add_argument('--grow_halfrange', type=float, default=2.0,
+                    help='factor by which the search half range grows per round for the drifting branches (1 = constant); '
+                         'the number of lattice samples grows with the volume (cost ~ factor^3 per round)')
+    pf.add_argument('--max_halfrange_fac', type=float, default=4.0, help='cap of the half-range growth, as a factor of the initial half range')
+    pf.add_argument('--bank_seeds', type=int, default=0,
+                    help='1: in grown balls, use the stage-1 bank templates inside the ball as extra starting points of the '
+                         'sampled lattice (reaches the sheets of the orbit manifold that the bank samples; costly)')
+    pf.add_argument('--drift_snr_ratio', type=float, default=1.5,
+                    help='keep a branch drifting when a candidate at the same frequency (within drift_fdiff) and DM is at least '
+                         'this many times brighter (0 = off)')
+    pf.add_argument('--drift_fdiff', type=float, default=3e-3, help="fractional frequency window of the drift trigger (the bank's maximal Doppler shift)")
+    pf.add_argument('--drift_dm_tol', type=float, default=1.5, help='DM tolerance of the drift trigger (pc/cc)')
     pf.add_argument('--edge_frac', type=float, default=0.9, help='a result farther than this fraction of the half range (or of the frequency scan range) from the centre continues to the next round')
     pf.add_argument('--nominal_mismatch', type=float, default=None)
     pf.add_argument('--template_bank', default=None)
@@ -1679,7 +1854,7 @@ def main():
                     help='iterations of the local refinement of each peak (parabolic steps along the metric eigen-directions '
                          'starting at half the grid step, halved every iteration; 7 evaluations per peak and iteration; 0 = off)')
     pf.add_argument('--sample_nlead', type=int, default=3)
-    pf.add_argument('--sample_n', type=int, default=2000)
+    pf.add_argument('--sample_n', type=int, default=4000)
     pf.set_defaults(func=cmd_foldsearch)
 
     args = parser.parse_args()

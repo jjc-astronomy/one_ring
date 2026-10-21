@@ -138,10 +138,15 @@ and search segment:
    `scripts/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels (built with
    `scripts/build_resample_timeseries.sh` inside the peasoup container, or on the fly in the job).
    With `fold.method = "gpu_fold"` (default) every fine-lattice template is resampled into its own
-   emission frame and folded on the device in one pass, at its Doppler-corrected frequency
-   (f_obs minus the linear term of the template relative to the peak), into `fold.nsub`
-   sub-integrations; the small grid of frequency offsets (`fold.f0_halfrange_bins`,
-   `fold.f0_step_bins`) is then searched on the device too, by whole-bin shifts of the
+   emission frame and folded on the device in one pass, at the frequency where the stage-1 FFT
+   finds a signal with that orbit when the series is resampled with the peak's template: the
+   peak of the FFT of exp(i delta_phi) of the residual orbital phase (Jiang et al.). The linear
+   term of the residual alone (the n = 1 Legendre coefficient) is wrong by several bins once the
+   residual exceeds a radian, up to 20 bins for the aliases of NGC 6544A, whereas the FFT peak
+   reproduces the stage-1 frequency to the interbinning quantisation (< 0.8 bins on all 12 peaks)
+   whatever the distance, so the grid of frequency offsets (`fold.f0_halfrange_bins`, 1.5 bins,
+   `fold.f0_step_bins`) only covers that quantisation and does not grow with the search ball.
+   The grid is searched on the device too, by whole-bin shifts of the
    sub-integrations, and scored with pyloki's boxcar matched filter, so that only the best
    (S/N, width, offset) per template is returned to the host. The best (orbit, frequency) of every peak
    is then refined iteratively (`fold.refine_iter`): parabolic steps along the eigen-directions of
@@ -163,7 +168,20 @@ and search segment:
    branch is re-centred on that result and searched again; after every round all branches are
    clustered in spin-frequency and Legendre-coefficient space (`distance_tol`, `f0tol_fac`,
    `min_prominence`), so the branches of one bright pulsar that converge to the same orbit merge.
-   The XML records `fold_rounds` per candidate. The peaks are split into jobs of
+   The XML records `fold_rounds` per candidate. The region of a drifting branch doubles every
+   round (`fold.grow_halfrange`, capped by `fold.max_halfrange_fac`; the lattice samples follow the
+   volume), and a branch that stops at a local maximum
+   keeps drifting while a candidate at the same frequency and DM is much brighter
+   (`fold.drift_snr_ratio`, `drift_fdiff`, `drift_dm_tol`): such a branch is an alias of that signal.
+   The lattice of the `sample` type is built by inverting the three leading coefficients of every
+   sampled target in closed form: the ratio a4/a2 = -(3/sqrt5) j4(s)/j2(s) (s = pi T / Pb) depends on
+   the orbital period alone and is monotone between consecutive zeros of j2 (s = 5.76, 9.10, ...),
+   so the period is read off a table of j4/j2 on each pole-free interval, after which a3 gives the
+   phase and the norm gives a1. One root per interval is one orbit per sheet of the folded orbit
+   manifold, with no starting point and no iteration; for 60 min segments and Pb >= 1.5 h the whole
+   range lies below the first zero of j2, so the map is one-to-one. On the 12 stage-1 peaks of
+   J1807-2459A in one DM trial this merges all branches into the single true solution (fold S/N
+   325, 4 rounds, 415 s, against 55 s for one round). The peaks are split into jobs of
    `fold.peaks_per_job`, run on GPU nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
 5. merges the stage-2 chunk results into a single XML file, clustered again (in spin frequency and
    Legendre-coefficient space) if `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
