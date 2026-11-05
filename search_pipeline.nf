@@ -2,7 +2,7 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 
 include { filtool; peasoup; candy_picker; pulsarx; pics; post_folding_heuristics } from './modules'
-include { generate_fine_template_bank; hierarchical_fold_search; merge_hierarchical_candidates } from './modules'
+include { generate_fine_template_bank; hierarchical_fold_search } from './modules'
 
 
 workflow {
@@ -94,7 +94,7 @@ workflow {
 
     def hierarchical_dirs = [
         search_dir : params.hierarchical_search?.search_publish_dir ?: '11_HIERARCHICAL_SEARCH',
-        fold_dir   : params.hierarchical_search?.fold_publish_dir   ?: '12_HIERARCHICAL_SEARCH',
+        fold_dir   : params.hierarchical_search?.fold_publish_dir   ?: '12_HIERARCHICAL_FOLD',
         filter_dir : params.hierarchical_search?.filter_publish_dir ?: '13_HIERARCHICAL_SEARCH'
     ]
     def stage1_dirs = (hierarchical_enabled ? hierarchical_dirs : [search_dir: '05_SEARCH', fold_dir: '09_FOLD_FIL', filter_dir: '10_FOLD_FIL_FILTER']) +
@@ -170,8 +170,8 @@ workflow {
      * 3. hierarchical_fold_search (stage 2): the dedispersed time series dumped by stage 1 are resampled
      *    and folded on the GPU for every fine-lattice template of every peak, one job per dumped DM
      *    trial. The DM range of a group is the union of the stage-1 DM ranges.
-     * 4. Optionally (merge_stage2 == 1) the stage-2 job results are merged into a single XML file
-     *    (clustered again if cluster_stage2 == 1), which is what gets folded.
+     * 4. Candidates are clustered in every round of the stage-2 search, so the stage-2 XML file of every
+     *    DM trial is folded directly.
      *
      * Everything downstream (candy_picker, pulsarx, pics, ...) consumes 'search_output'. Every record of
      * 'search_output' carries, as its last element, the map of stage directories its products are published
@@ -182,7 +182,7 @@ workflow {
     if (params.hierarchical_search != null && params.hierarchical_search.enable == 1) {
         def hs = params.hierarchical_search
         def stage1_cfg_regex = hs.stage1_cfg_regex ?: '.*'
-        def stage2_dirs = hierarchical_dirs + [fold_config: pulsarx_fold_config_hier, fold_group: foldGroupName_hier]
+        def stage2_dirs = hierarchical_dirs + [fold_config: pulsarx_fold_config_hier, fold_group: foldGroupName_hier, fold_group_subdir: false]
         def sameNumber = { a, b -> new BigDecimal(a.toString()).compareTo(new BigDecimal(b.toString())) == 0 }
         def findStage1Program = { cfg_name, coherent_dm, dm_start, dm_end ->
             peasoup_prog.find { p ->
@@ -317,60 +317,8 @@ workflow {
                     timeseries   : ts_files
                 ]
             }
-        stage2_output = hierarchical_fold_search(stage2_input)
-        stage2_nchunks = fold_jobs
-            .map { key, meta, peaks_csv, reference_xml, dm, dm_list, njobs, peaks_dp_id, ts_files ->
-                tuple([meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.dm_start, meta.dm_end, meta.cfg_hier].join('|'), njobs)
-            }
-            .unique()
-
-        if (hs.merge_stage2 == 1) {
-            // stage2_nchunks: number of stage-2 jobs per group, so that the merge starts as soon as all are done
-            merge_input = stage2_output
-                .map { output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end ->
-                    def cs = cfg_name.toString()
-                    def cfg_hier = cs.substring(0, cs.lastIndexOf('/'))
-                    def key = [target_name, utc_start, beam_id, filstr, dm_start, dm_end, cfg_hier].join('|')
-                    tuple(key, output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end)
-                }
-                .combine(stage2_nchunks, by: 0)
-                .map { key, output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end, nchunks ->
-                    tuple(groupKey(key, nchunks), output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_hier, utc_start, target_name, beam_id, filstr, dm_start, dm_end)
-                }
-                .groupTuple(by: 0)
-                .map { key, xml_list, xml_dp_id_list, segment_pepoch_list, beam_name_list, coherent_dm_list, cfg_hier_list, utc_start_list, target_name_list, beam_id_list, filstr_list, dm_start_list, dm_end_list ->
-                    def meta = [
-                        target_name    : target_name_list[0],
-                        utc_start      : utc_start_list[0],
-                        beam_name      : beam_name_list[0],
-                        beam_id        : beam_id_list[0],
-                        filstr         : filstr_list[0],
-                        coherent_dm    : coherent_dm_list[0],
-                        segment_pepoch : segment_pepoch_list[0],
-                        dm_start       : dm_start_list[0],
-                        dm_end         : dm_end_list[0],
-                        cfg_hier       : cfg_hier_list[0]
-                    ]
-                    [
-                        program_name : 'hierarchical_merge',
-                        pipeline_id  : params.pipeline_id,
-                        hardware_id  : filtool_prog.data_products[0].hardware_id,
-                        beam_id      : meta.beam_id,
-                        input_dp     : xml_list.collect { it.toString() }.join(' '),
-                        input_dp_id  : xml_dp_id_list.collect { it.toString() }.join(' '),
-                        output_dp    : 'output.xml',
-                        meta         : meta,
-                        stage2_xmls  : xml_list
-                    ]
-                }
-
-            hierarchical_output = merge_hierarchical_candidates(merge_input)
-        }
-        else {
-            hierarchical_output = stage2_output
-        }
-
-        hierarchical_output = hierarchical_output.map { rec -> rec + [stage2_dirs] }
+        stage2_output = hierarchical_fold_search(stage2_input).xml
+        hierarchical_output = stage2_output.map { rec -> rec + [stage2_dirs] }
         search_output = hs.fold_stage1_candidates == 1 ? hierarchical_output.mix(search_output) : hierarchical_output
     }
 

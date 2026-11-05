@@ -1464,6 +1464,30 @@ def cmd_foldsearch(args):
     ntemplates_total = 0
     ntemplates_extra = [0]     # evaluations of the local refinement (see --refine_iter)
 
+    # History of the search (written to args.history): one row per branch and stage-2 round, one row per peak and
+    # stage-3 refinement iteration. 'centre' is the template the round / iteration starts from (round 1: the
+    # stage-1 template), 'best' its best evaluated template; S/N is the fold-search S/N of the resampler.
+    history = []
+    refine_origin = []         # stage-1 peak index of every entry of 'results' during the refinement
+
+    def tmpl_cols(prefix, tm, f):
+        tm = np.asarray(tm, dtype=np.float64)
+        return {prefix + '_f0': float(f), prefix + '_pb_days': float(2 * np.pi / tm[0] / 86400.), prefix + '_a1': float(tm[1]),
+                prefix + '_phi_deg': float(np.rad2deg(tm[2] % (2 * np.pi)))}
+
+    def add_history(stage, rnd, it, peak, dm, centre, f_centre, snr_centre, best, f_best, snr_best, width, nsub,
+                    running_snr, step_h=float('nan'), dist_frac=float('nan'), df_frac=float('nan'), drifting='', stationary='',
+                    status='', ntemplates=0):
+        p = peaks0[peak]
+        row = dict(stage=stage, round=rnd, iteration=it, peak=int(peak), stage1_period=float(p['period']),
+                   stage1_snr=float(p['snr']), dm=float(dm))
+        row.update(tmpl_cols('centre', centre, f_centre)); row['centre_snr'] = float(snr_centre)
+        row.update(tmpl_cols('best', best, f_best)); row['best_snr'] = float(snr_best)
+        row.update(best_width=int(width), nsub=int(nsub), running_best_snr=float(running_snr), ntemplates=int(ntemplates),
+                   step_h=float(step_h), dist_frac=float(dist_frac), df_frac=float(df_frac), drifting=drifting,
+                   stationary=stationary, status=status)
+        history.append(row)
+
     def search_peak(ip, ts, dm):
         """Score the lattice of peak ip on the series ts (already in the frame of its template if resampling)."""
         templates = lattice_of(tmpl_of_peak[ip])
@@ -1485,7 +1509,8 @@ def cmd_foldsearch(args):
         f_obs - c1(template) (c1 = FFT-peak offset of the template's residual phase relative to the peak), so that
         only the frequency grid remains to be searched on the folded profiles. No orbital phase approximation.
         """
-        templates = lattice_of(tmpl_of_peak[ip])
+        # the centre itself is folded too (last entry), so that its S/N is exact (recorded in the history)
+        templates = np.concatenate([lattice_of(tmpl_of_peak[ip]), peak_tmpl[ip][None, :]])
         f0 = peak_f0[ip]
         # fold every template at the frequency where the stage-1 FFT would have found it (exact to the
         # interbinning quantisation whatever the distance from the centre, so the scan does not grow with the ball)
@@ -1496,10 +1521,11 @@ def cmd_foldsearch(args):
                                             f0_half, args.f0_step_bins, args.ducy_max, args.resampler_mode)
         df = df_bins / tobs
         i = int(np.argmax(snr))
-        ipk = int(np.argmin(np.linalg.norm(templates - peak_tmpl[ip], axis=1)))   # the peak's own template
+        ipk = len(templates) - 1                    # the peak's own template (the centre, appended above)
         res = dict(snr=float(snr[i]), width=int(wid[i]), template=templates[i].copy(),
                    dfreq=float(f0_fold[i] + df[i] - f0), dfreq_grid=float(df[i]), itemplate=i,
-                   snr_peak_template=float(snr[ipk]), dm=float(dm), nsub=nsub, drift=float(args.nbins * args.f0_halfrange_bins / nsub),
+                   snr_peak_template=float(snr[ipk]), f_peak_template=float(f0_fold[ipk] + df[ipk]),
+                   ntemplates=len(templates), dm=float(dm), nsub=nsub, drift=float(args.nbins * args.f0_halfrange_bins / nsub),
                    refined=0)
         if best_of_peak[ip] is None or res['snr'] > best_of_peak[ip]['snr']:
             best_of_peak[ip] = res
@@ -1564,6 +1590,11 @@ def cmd_foldsearch(args):
                     ip = ips[k]; tmpl = trials[7 * k + j]
                     best_of_peak[ip].update(snr=float(snr_t[k, j]), width=int(wid_t[k, j]), template=tmpl.copy(),
                                             dfreq=float(f_fold[7 * k + j] + dfb_t[k, j] / tobs - peak_f0[ip]), refined=it + 1)
+                if refine_origin:
+                    ip = ips[k]
+                    add_history(3, '', it + 1, refine_origin[ip], best_of_peak[ip]['dm'], c, f_fold[7 * k] + dfb_t[k, 0] / tobs, snr_t[k, 0],
+                                trials[7 * k + j], f_fold[7 * k + j] + dfb_t[k, j] / tobs, snr_t[k, j], wid_t[k, j], nsub_r,
+                                snr_c[k], step_h=h, status='iteration', ntemplates=7)
             centres = new_centres
             h *= 0.5
         # final evaluation at the converged centres
@@ -1573,6 +1604,11 @@ def cmd_foldsearch(args):
             if snr_t[k] > snr_c[k]:
                 best_of_peak[ip].update(snr=float(snr_t[k]), width=int(wid_t[k]), template=centres[k].copy(),
                                         dfreq=float(f_c[k] + dfb_t[k] / tobs - peak_f0[ip]), refined=nit + 1)
+            if refine_origin:
+                b = best_of_peak[ip]
+                add_history(3, '', nit + 1, refine_origin[ip], b['dm'], centres[k], f_c[k] + dfb_t[k] / tobs, snr_t[k],
+                            b['template'], peak_f0[ip] + b['dfreq'], b['snr'], b['width'], nsub_r, b['snr'],
+                            step_h=h, status='final', ntemplates=1)
 
     # Work list: (DM trial, unique template) -> peaks
     work = {}
@@ -1647,6 +1683,11 @@ def cmd_foldsearch(args):
             else:
                 keep = np.ones(len(allb), dtype=bool)
             nfin = len(finished)
+            for b, k in zip(finished, keep[:nfin]):
+                if not k:       # a branch finished in an earlier round, merged into a brighter one in this round
+                    add_history(2, rnd, '', b[0], b[2]['dm'], b[2]['template'], b[1] + b[2]['dfreq'], float('nan'),
+                                b[2]['template'], b[1] + b[2]['dfreq'], b[2]['snr'], b[2]['width'], b[2]['nsub'], b[2]['snr'],
+                                dist_frac=b[4], df_frac=b[5], status='merged_after_finish')
             finished = [b for b, k in zip(finished, keep[:nfin]) if k]
             keep_cur = keep[nfin:]
             n_cont = int((keep_cur & drifting).sum()) if rnd < args.max_rounds else 0
@@ -1656,14 +1697,22 @@ def cmd_foldsearch(args):
             cont = []
             for ip in range(len(peaks)):
                 if not keep_cur[ip]:
-                    continue
-                key = centre_key(cur[ip][2]['template'], cur[ip][1] + cur[ip][2]['dfreq'])
-                if drifting[ip] and rnd < args.max_rounds and key not in visited[origin[ip]]:
-                    visited[origin[ip]].add(key)
-                    cont.append(ip)
+                    status = 'merged'
                 else:
-                    # converged, out of rounds, or back on a centre this branch has already searched (cycle)
-                    finished.append(cur[ip])
+                    key = centre_key(cur[ip][2]['template'], cur[ip][1] + cur[ip][2]['dfreq'])
+                    if drifting[ip] and rnd < args.max_rounds and key not in visited[origin[ip]]:
+                        visited[origin[ip]].add(key)
+                        cont.append(ip)
+                        status = 'continue'
+                    else:
+                        # converged, out of rounds, or back on a centre this branch has already searched (cycle)
+                        finished.append(cur[ip])
+                        status = 'finished'
+                b = best_of_peak[ip]
+                add_history(2, rnd, '', origin[ip], b['dm'], peak_tmpl[ip], b['f_peak_template'], b['snr_peak_template'],
+                            b['template'], peak_f0[ip] + b['dfreq'], b['snr'], b['width'], b['nsub'], b['snr'],
+                            step_h=stepsize, dist_frac=d_frac[ip], df_frac=f_frac[ip], drifting=int(drifting[ip]),
+                            stationary=int(stationary[ip]), status=status, ntemplates=b['ntemplates'])
             if not cont:
                 break
             # re-centre the drifting branches on their best result: new template, new frequency, best DM trial
@@ -1680,6 +1729,7 @@ def cmd_foldsearch(args):
             peaks = [peaks0[b[0]] for b in results]
             peak_f0 = np.array([b[1] for b in results]); peak_tmpl = np.array([b[2]['template'] for b in results]).reshape(-1, 3)
             best_of_peak[:] = [b[2] for b in results]; nsub_of_peak[:] = [b[2]['nsub'] for b in results]
+            refine_origin[:] = [b[0] for b in results]
             for dm in sorted({round(b[2]['dm'], 4) for b in results}):
                 ips = [k for k, b in enumerate(results) if round(b[2]['dm'], 4) == dm]
                 refine_peaks_batched(series[dm][2], ips)
@@ -1732,6 +1782,16 @@ def cmd_foldsearch(args):
         logging.info("%d stage-1 peaks -> %d candidates after %d round(s); rounds per candidate: median %d, max %d; "
                      "final position / half range median %.2f, %d still beyond %.2f",
                      len(peaks0), len(results), int(rr.max()), int(np.median(rr)), int(rr.max()), np.median(dfr), int((dfr > args.edge_frac).sum()), args.edge_frac)
+    if args.history:
+        cols = ['stage', 'round', 'iteration', 'peak', 'stage1_period', 'stage1_snr', 'dm',
+                'centre_f0', 'centre_pb_days', 'centre_a1', 'centre_phi_deg', 'centre_snr',
+                'best_f0', 'best_pb_days', 'best_a1', 'best_phi_deg', 'best_snr', 'best_width', 'nsub',
+                'running_best_snr', 'ntemplates', 'step_h', 'dist_frac', 'df_frac', 'drifting', 'stationary', 'status']
+        with open(args.history, 'w', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            w.writeheader()
+            w.writerows(history)
+        logging.info("wrote %s with %d rows (stage-2 rounds and stage-3 refinement iterations)", args.history, len(history))
     write_peasoup_like_xml(args.reference_xml, args.output, cands, ntemplates_total)
     logging.info("wrote %s with %d candidates (%d template evaluations + %d in the local refinement)", args.output, len(cands),
                  ntemplates_total, ntemplates_extra[0])
@@ -1807,6 +1867,9 @@ def main():
     pf.add_argument('--timeseries', nargs='+', required=True, help='peasoup -d .dat files (with .inf) of the DM trials')
     pf.add_argument('--reference_xml', required=True, help='a stage-1 output.xml of the same segment (header template)')
     pf.add_argument('-o', '--output', default='output.xml')
+    pf.add_argument('--history', default='foldsearch_history.csv',
+                    help='CSV with the centre and best template and S/N of every branch in every stage-2 round and of '
+                         'every peak in every stage-3 refinement iteration (empty string: not written)')
     pf.add_argument('--chunk', type=int, default=0, help='this job processes peaks chunk::nchunks')
     pf.add_argument('--nchunks', type=int, default=1)
     pf.add_argument('--only_used', action='store_true', help='skip peaks dropped by max_peaks / max_templates')

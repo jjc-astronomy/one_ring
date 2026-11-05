@@ -345,7 +345,7 @@ process pulsarx {
     label 'pulsarx'
     container "${params.apptainer_images.pulsarx}"
     //publishDir "${params.publish_dir_prefix}/09_FOLD_FIL/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${cfg_name}/${foldGroupName}/", pattern: "*.{ar,png,cands,csv}", mode: 'copy'
-    publishDir "${params.publish_dir_prefix}/${stage_dirs.fold_dir}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/", pattern: "*.{png,cands,csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/${stage_dirs.fold_dir}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${stage_dirs.fold_group_subdir == false ? '' : foldGroupName + '/'}", pattern: "*.{png,cands,csv}", mode: 'copy'
 
     input:
     tuple val(program_name),
@@ -391,7 +391,7 @@ process pulsarx {
         return 0
     }
 
-    publish_dir="${params.publish_dir_prefix}/${stage_dirs.fold_dir}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${foldGroupName}/"
+    publish_dir="${params.publish_dir_prefix}/${stage_dirs.fold_dir}/${target_name}/${utc_start}/${filstr}/${params.pipeline_name}/${dm_start}_${dm_end}/${cfg_name}/${stage_dirs.fold_group_subdir == false ? '' : foldGroupName + '/'}"
     filterbank_publish_dir="${params.publish_dir_prefix}/03_FILTOOLED/${target_name}/${utc_start}/${filstr}/"
 
     echo "Running PulsarX folding with the following command:"
@@ -587,8 +587,6 @@ process post_folding_heuristics{
  * generate_fine_template_bank : cluster the stage-1 candidates of one filterbank/segment in
  *                               Legendre-coefficient space and build a fine template bank
  *                               around every S/N peak (written as peasoup chunk files).
- * merge_hierarchical_candidates: merge the stage-2 chunk XML files into a single XML file
- *                               (optionally keeping only S/N peaks) for folding.
  *
  * 'meta' is a map carrying the bookkeeping fields of the group (target_name, utc_start, beam_name,
  * beam_id, filstr, coherent_dm, segment_pepoch, dm_start, dm_end, cfg_base, cfg_hier, ...).
@@ -659,63 +657,13 @@ process generate_fine_template_bank {
     """
 }
 
-process merge_hierarchical_candidates {
-    label 'hierarchical_merge'
-    container "${params.apptainer_images.pulsarx}"
-    tag "${meta.filstr} ${meta.cfg_hier}/merged ${meta.dm_start}_${meta.dm_end}"
-
-    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/merged/", pattern: "output.xml", mode: 'copy'
-
-    input:
-    tuple val(program_name),
-          val(pipeline_id),
-          val(hardware_id),
-          val(beam_id),
-          val(input_dp),
-          val(input_dp_id),
-          val(output_dp),
-          val(meta),
-          path(stage2_xmls, stageAs: 'stage2_xml_?????.xml')
-
-    output:
-    // Same shape as the peasoup process output so that the folding stage can consume it unchanged.
-    tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val("${meta.cfg_hier}/merged"), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end)
-
-    script:
-    def hs = params.hierarchical_search
-    def optional_args = ""
-    if (hs.cluster_stage2 == 1) optional_args += " --cluster"
-    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
-    if (hs.tobs != null)        optional_args += " --tobs ${hs.tobs}"
-    """
-    #!/bin/bash
-    set -euo pipefail
-
-    publish_dir="${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/merged/"
-
-    echo "Merging stage-2 candidates from the following XML files:"
-    ls -v stage2_xml_*.xml
-
-    python ${hs.script} merge \\
-        -i stage2_xml_*.xml \\
-        -o ${output_dp} \\
-        --order_highest ${hs.order_highest} \\
-        --f0tol_fac ${hs.f0tol_fac} \\
-        --distance_tol ${hs.distance_tol} \\
-        --min_prominence ${hs.min_prominence} \\
-        --workers ${task.cpus} ${optional_args}
-
-    output_dp_id=\$(uuidgen)
-    """
-}
-
 process hierarchical_fold_search {
     label 'hierarchical_fold'
     // peasoup image: CUDA + nvcc for the resampler, python with numpy for the fold search
     container "${params.apptainer_images.hierarchical_fold ?: params.apptainer_images.peasoup}"   // CUDA for the resampler + numpy/scipy; falls back to the peasoup image
     tag "${meta.filstr} ${cfg_name} ${meta.dm_start}_${meta.dm_end}"
 
-    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "${output_dp}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "{${output_dp},foldsearch_history.csv}", mode: 'copy'
 
     input:
     tuple val(program_name),
@@ -734,8 +682,10 @@ process hierarchical_fold_search {
           path(timeseries, stageAs: 'ts_?????/*')   // the .dat and .inf of this job's DM trial
 
     output:
-    // Same shape as the peasoup process output so that the merge and folding stages consume it unchanged.
-    tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val(cfg_name), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end)
+    // Same shape as the peasoup process output so that the folding stage consumes it unchanged.
+    tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val(cfg_name), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end), emit: xml
+    // template and S/N of every stage-2 round and stage-3 refinement iteration (published only)
+    path("foldsearch_history.csv"), emit: history
 
     script:
     def hs = params.hierarchical_search
@@ -792,7 +742,7 @@ process hierarchical_fold_search {
         --order_highest ${hs.order_highest} \\
         --search_halfrange_fac ${hs.search_halfrange_fac} --search_stepsize_fac ${hs.search_stepsize_fac} \\
         --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\
-        -o ${output_dp} ${optional_args}
+        -o ${output_dp} --history foldsearch_history.csv ${optional_args}
 
     output_dp_id=\$(uuidgen)
     """
