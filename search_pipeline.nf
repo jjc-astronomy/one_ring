@@ -2,7 +2,7 @@ nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 
 include { filtool; peasoup; candy_picker; pulsarx; pics; post_folding_heuristics } from './modules'
-include { generate_fine_template_bank; hierarchical_fold_search } from './modules'
+include { hierarchical_fold_search } from './modules'
 
 
 workflow {
@@ -165,12 +165,12 @@ workflow {
      *
      * 1. The stage-1 peasoup results of one filterbank + segment (all template bank chunks and, if
      *    merge_dm_ranges == 1, all incoherent DM ranges) are grouped together.
-     * 2. generate_fine_template_bank clusters the candidates in Legendre-coefficient space and keeps the
-     *    S/N peaks (clustered_peaks.csv); the fine lattice around every peak is regenerated in stage 2.
-     * 3. hierarchical_fold_search (stage 2): the dedispersed time series dumped by stage 1 are resampled
-     *    and folded on the GPU for every fine-lattice template of every peak, one job per dumped DM
-     *    trial. The DM range of a group is the union of the stage-1 DM ranges.
-     * 4. Candidates are clustered in every round of the stage-2 search, so the stage-2 XML file of every
+     * 2. hierarchical_fold_search (stage 2 and 3), one job per dumped DM trial: it starts by clustering all
+     *    stage-1 candidates of the group in Legendre-coefficient space into S/N peaks (clustered_peaks.csv),
+     *    then the dedispersed time series dumped by stage 1 are resampled and folded on the GPU for every
+     *    fine-lattice template of every peak whose nearest DM trial is the job's. The DM range of a group is
+     *    the union of the stage-1 DM ranges.
+     * 3. Candidates are clustered in every round of the stage-2 search, so the stage-2 XML file of every
      *    DM trial is folded directly.
      *
      * Everything downstream (candy_picker, pulsarx, pics, ...) consumes 'search_output'. Every record of
@@ -270,20 +270,8 @@ workflow {
                     stage1_program_args : stage1_prog_list[0].arguments,
                     stage1_program_id   : stage1_prog_list[0].program_id
                 ]
-                [
-                    program_name : 'hierarchical_template_bank',
-                    pipeline_id  : params.pipeline_id,
-                    hardware_id  : filtool_prog.data_products[0].hardware_id,
-                    beam_id      : meta.beam_id,
-                    input_dp     : xml_list.collect { it.toString() }.join(' '),
-                    input_dp_id  : xml_dp_id_list.collect { it.toString() }.join(' '),
-                    meta         : meta,
-                    stage1_xmls  : xml_list
-                ]
+                [meta: meta, stage1_xmls: xml_list, stage1_dp_ids: xml_dp_id_list.collect { it.toString() }.join(' ')]
             }
-
-        generate_fine_template_bank(hierarchical_groups)
-        fine_peaks = generate_fine_template_bank.out.peaks
 
         /*
          * Stage 2 by folding (LOKI scheme): the dumped time series of the group's DM trials are folded with
@@ -303,13 +291,14 @@ workflow {
 
         // one stage-2 job per dumped time series (DM trial): the job takes every peak whose nearest DM trial is
         // that series, so that all branches of a signal at one DM drift and merge within the job
-        fold_jobs = fine_peaks
-            .map { meta, peaks_csv, summary_json, reference_xml, output_dp, output_dp_id, publish_dir ->
-                def key = [meta.utc_start, meta.beam_id, meta.filstr, segKey(meta.stage1_program_args)].join('|')
-                tuple(key, meta, peaks_csv, reference_xml, output_dp_id)
+        // (every job of a group gets all stage-1 XML files of the group and clusters them itself)
+        fold_jobs = hierarchical_groups
+            .map { g ->
+                def key = [g.meta.utc_start, g.meta.beam_id, g.meta.filstr, segKey(g.meta.stage1_program_args)].join('|')
+                tuple(key, g.meta, g.stage1_xmls, g.stage1_dp_ids)
             }
             .combine(timeseries_groups, by: 0)
-            .flatMap { key, meta, peaks_csv, reference_xml, peaks_dp_id, ts_files ->
+            .flatMap { key, meta, stage1_xmls, stage1_dp_ids, ts_files ->
                 def dats = ts_files.findAll { it.toString().endsWith('.dat') }.sort { it.toString() }
                 def dmOf = { f -> def m = (f.toString() =~ /_DM(\d+\.\d+)\.dat$/); m ? m[0][1] : null }
                 def dm_list = dats.collect { dmOf(it) }.findAll { it != null }.join(' ')
@@ -317,25 +306,24 @@ workflow {
                     def dm = dmOf(dat)
                     def stem = dat.toString().replaceAll(/\.dat$/, '')
                     def files = ts_files.findAll { it.toString() == dat.toString() || it.toString() == stem + '.inf' }
-                    tuple(key, meta, peaks_csv, reference_xml, dm, dm_list, dats.size(), peaks_dp_id, files)
+                    tuple(key, meta, stage1_xmls, dm, dm_list, dats.size(), stage1_dp_ids, files)
                 }
             }
         stage2_input = fold_jobs
-            .map { key, meta, peaks_csv, reference_xml, dm, dm_list, njobs, peaks_dp_id, ts_files ->
+            .map { key, meta, stage1_xmls, dm, dm_list, njobs, stage1_dp_ids, ts_files ->
                 [
                     program_name : 'hierarchical_fold_search',
                     pipeline_id  : params.pipeline_id,
                     hardware_id  : filtool_prog.data_products[0].hardware_id,
                     beam_id      : meta.beam_id,
-                    input_dp     : ([peaks_csv] + ts_files).collect { it.toString() }.join(' '),
-                    input_dp_id  : peaks_dp_id.toString().split(/\s+/)[0],
+                    input_dp     : (stage1_xmls + ts_files).collect { it.toString() }.join(' '),
+                    input_dp_id  : stage1_dp_ids,
                     output_dp    : 'output.xml',
                     meta         : meta,
                     cfg_name     : "${meta.cfg_hier}/fold_dm${dm}".toString(),
                     dm_select    : dm,
                     dm_list      : dm_list,
-                    peaks_csv    : peaks_csv,
-                    reference_xml: reference_xml,
+                    stage1_xmls  : stage1_xmls,
                     timeseries   : ts_files
                 ]
             }

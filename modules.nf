@@ -582,83 +582,24 @@ process post_folding_heuristics{
 }
 
 /*
- * Hierarchical (two-stage) template bank search.
+ * Hierarchical (two-stage) template bank search, stage 2 and 3: hierarchical_fold_search.
  *
- * generate_fine_template_bank : cluster the stage-1 candidates of one filterbank/segment in
- *                               Legendre-coefficient space into S/N peaks (clustered_peaks.csv).
- *                               The fine lattice around every peak is generated in stage 2
- *                               (hierarchical_fold_search).
+ * One job per dumped DM trial of a filterbank/segment group. The job first clusters ALL stage-1
+ * candidates of the group in Legendre-coefficient space into S/N peaks (hierarchical_search.py cluster,
+ * clustered_peaks.csv; every job of the group repeats the same deterministic clustering, about a
+ * second), then fold-searches the peaks whose nearest DM trial is its own (--dm_select): fine lattice
+ * per peak, branch drift and clustering every round, local refinement (stage 3).
  *
  * 'meta' is a map carrying the bookkeeping fields of the group (target_name, utc_start, beam_name,
  * beam_id, filstr, coherent_dm, segment_pepoch, dm_start, dm_end, cfg_base, cfg_hier, ...).
  */
-process generate_fine_template_bank {
-    label 'hierarchical_template_bank'
-    container "${params.apptainer_images.pulsarx}"
-    tag "${meta.filstr} ${meta.cfg_hier} ${meta.dm_start}_${meta.dm_end}"
-
-    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}/", pattern: "{clustered_peaks.csv,hierarchical_summary.json}", mode: 'copy'
-
-    // program_name .. input_dp_id are named so that the database watchdog (nf-live-tracking events) can record
-    // the task, its input data products (the stage-1 XML files) and its output data products.
-    input:
-    tuple val(program_name),
-          val(pipeline_id),
-          val(hardware_id),
-          val(beam_id),
-          val(input_dp),
-          val(input_dp_id),
-          val(meta),
-          path(stage1_xmls, stageAs: 'stage1_xml_?????.xml')
-
-    output:
-    tuple val(meta), path("clustered_peaks.csv"), path("hierarchical_summary.json"), path("stage1_reference.xml"), env(output_dp), env(output_dp_id), env(publish_dir), emit: peaks
-
-    script:
-    def hs = params.hierarchical_search
-    def publish_root = "${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}"
-    def optional_args = ""
-    // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS)
-    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
-    if (hs.tobs != null)    optional_args += " --tobs ${hs.tobs}"
-    if (hs.min_snr != null) optional_args += " --min_snr ${hs.min_snr}"
-    if (hs.max_peaks != null)     optional_args += " --max_peaks ${hs.max_peaks}"
-    """
-    #!/bin/bash
-    set -euo pipefail
-
-    echo "Clustering stage-1 candidates from the following XML files:"
-    ls -v stage1_xml_*.xml
-
-    python ${hs.script} cluster \\
-        -i stage1_xml_*.xml \\
-        --order_highest ${hs.order_highest} \\
-        --f0tol_fac ${hs.f0tol_fac} \\
-        --distance_tol ${hs.distance_tol} \\
-        --min_prominence ${hs.min_prominence} \\
-        --workers ${task.cpus} ${optional_args}
-
-    # one stage-1 XML as header template for the fold search output
-    cp -L stage1_xml_00001.xml stage1_reference.xml
-
-    # Data products for the database: the clustering summary, one publish directory per file.
-    output_dp="clustered_peaks.csv hierarchical_summary.json"
-    publish_dir="${publish_root}/ ${publish_root}/"
-    output_dp_id=""
-    for f in \${output_dp}; do
-        output_dp_id="\${output_dp_id} \$(uuidgen)"
-    done
-    output_dp_id=\$(echo \${output_dp_id})
-    """
-}
-
 process hierarchical_fold_search {
     label 'hierarchical_fold'
     // peasoup image: CUDA + nvcc for the resampler, python with numpy for the fold search
     container "${params.apptainer_images.hierarchical_fold ?: params.apptainer_images.peasoup}"   // CUDA for the resampler + numpy/scipy; falls back to the peasoup image
     tag "${meta.filstr} ${cfg_name} ${meta.dm_start}_${meta.dm_end}"
 
-    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "{${output_dp},foldsearch_history.csv}", mode: 'copy'
+    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "{${output_dp},foldsearch_history.csv,clustered_peaks.csv,hierarchical_summary.json}", mode: 'copy'
 
     input:
     tuple val(program_name),
@@ -672,8 +613,7 @@ process hierarchical_fold_search {
           val(cfg_name),
           val(dm_select),
           val(dm_list),
-          path(peaks_csv),
-          path(reference_xml),
+          path(stage1_xmls, stageAs: 'stage1_xml_?????.xml'),  // all stage-1 XML files of the group
           path(timeseries, stageAs: 'ts_?????/*')   // the .dat and .inf of this job's DM trial
 
     output:
@@ -681,6 +621,8 @@ process hierarchical_fold_search {
     tuple path(output_dp), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val(cfg_name), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end), emit: xml
     // template and S/N of every stage-2 round and stage-3 refinement iteration (published only)
     path("foldsearch_history.csv"), emit: history
+    // S/N peaks of the stage-1 candidates that start the search (published only)
+    tuple path("clustered_peaks.csv"), path("hierarchical_summary.json"), emit: clusters
 
     script:
     def hs = params.hierarchical_search
@@ -693,12 +635,30 @@ process hierarchical_fold_search {
     if (hs.tobs != null) optional_args += " --tobs ${hs.tobs}"
     if (fd.use_resampler == 1) optional_args += " --resampler ./resample_timeseries --resampler_mode ${fd.resampler_mode ?: 'nearest'}"
     if (fd.use_resampler == 1 && (fd.method ?: 'gpu_fold') == 'gpu_fold') optional_args += " --gpu_fold"
+    def cluster_args = ""
+    if (hs.nominal_mismatch != null) cluster_args += " --nominal_mismatch ${hs.nominal_mismatch}"
+    if (hs.tobs != null)      cluster_args += " --tobs ${hs.tobs}"
+    if (hs.min_snr != null)   cluster_args += " --min_snr ${hs.min_snr}"
+    if (hs.max_peaks != null) cluster_args += " --max_peaks ${hs.max_peaks}"
     def script_dir = new File(hs.script.toString()).getParent()
     """
     #!/bin/bash
     set -euo pipefail
 
     publish_dir="${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/"
+
+    # Start of stage 2: cluster all stage-1 candidates of the group into S/N peaks
+    echo "Clustering stage-1 candidates from the following XML files:"
+    ls -v stage1_xml_*.xml
+    python ${hs.script} cluster \\
+        -i \$(ls -v stage1_xml_*.xml) \\
+        --order_highest ${hs.order_highest} \\
+        --f0tol_fac ${hs.f0tol_fac} \\
+        --distance_tol ${hs.distance_tol} \\
+        --min_prominence ${hs.min_prominence} \\
+        --workers ${task.cpus} ${cluster_args}
+    # one stage-1 XML as header template for the fold search output
+    cp -L stage1_xml_00001.xml stage1_reference.xml
 
     if [ "${fd.use_resampler}" == "1" ]; then
         # resampler with peasoup's GPU kernels: prebuilt binary if present, otherwise built here with nvcc
@@ -723,9 +683,9 @@ process hierarchical_fold_search {
     ls -v series/*.dat
 
     python ${hs.script} foldsearch \\
-        --peaks ${peaks_csv} \\
+        --peaks clustered_peaks.csv \\
         --timeseries series/*.dat \\
-        --reference_xml ${reference_xml} \\
+        --reference_xml stage1_reference.xml \\
         --dm_select ${dm_select} --dm_list ${dm_list} --only_used \\
         --nsub ${fd.nsub} --max_phase_drift_bins ${fd.max_phase_drift_bins} --nsub_max ${fd.nsub_max} \\
         --nbins ${fd.nbins} --ducy_max ${fd.ducy_max} \\
