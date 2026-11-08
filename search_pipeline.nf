@@ -221,7 +221,29 @@ workflow {
                 tuple(group_key, output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end, stage1_prog)
             }
             .groupTuple(by: 0)
-            .map { key, xml_list, xml_dp_id_list, segment_pepoch_list, beam_name_list, coherent_dm_list, cfg_name_list, utc_start_list, target_name_list, beam_id_list, filstr_list, dm_start_list, dm_end_list, stage1_prog_list ->
+            .map { key, xml_list_in, xml_dp_id_list_in, segment_pepoch_list_in, beam_name_list_in, coherent_dm_list_in, cfg_name_list_in, utc_start_list_in, target_name_list_in, beam_id_list_in, filstr_list_in, dm_start_list_in, dm_end_list_in, stage1_prog_list_in ->
+                // groupTuple keeps the arrival order, which changes between runs (cached tasks are emitted in
+                // any order on -resume). Put every list in one fixed order (stage-1 cfg name, DM range, XML path)
+                // so that the staged file names and the task hash are reproducible.
+                def ord = (0..<xml_list_in.size()).toList().sort { a, b ->
+                    (cfg_name_list_in[a].toString() <=> cfg_name_list_in[b].toString()) ?:
+                    (new BigDecimal(dm_start_list_in[a].toString()) <=> new BigDecimal(dm_start_list_in[b].toString())) ?:
+                    (xml_list_in[a].toString() <=> xml_list_in[b].toString())
+                }
+                def reord = { l -> ord.collect { i -> l[i] } }
+                def xml_list = reord(xml_list_in)
+                def xml_dp_id_list = reord(xml_dp_id_list_in)
+                def segment_pepoch_list = reord(segment_pepoch_list_in)
+                def beam_name_list = reord(beam_name_list_in)
+                def coherent_dm_list = reord(coherent_dm_list_in)
+                def cfg_name_list = reord(cfg_name_list_in)
+                def utc_start_list = reord(utc_start_list_in)
+                def target_name_list = reord(target_name_list_in)
+                def beam_id_list = reord(beam_id_list_in)
+                def filstr_list = reord(filstr_list_in)
+                def dm_start_list = reord(dm_start_list_in)
+                def dm_end_list = reord(dm_end_list_in)
+                def stage1_prog_list = reord(stage1_prog_list_in)
                 // Stage-2 DM range: union of the stage-1 DM ranges (original string formatting is kept)
                 def i_min = (0..<dm_start_list.size()).min { new BigDecimal(dm_start_list[it].toString()) }
                 def i_max = (0..<dm_end_list.size()).max { new BigDecimal(dm_end_list[it].toString()) }
@@ -277,7 +299,7 @@ workflow {
                 tuple(groupKey(key, n), files instanceof List ? files : [files])
             }
             .groupTuple(by: 0)
-            .map { key, lists -> tuple(key.toString(), lists.flatten()) }
+            .map { key, lists -> tuple(key.toString(), lists.flatten().sort { it.toString() }) }   // fixed order for -resume
 
         // one stage-2 job per dumped time series (DM trial): the job takes every peak whose nearest DM trial is
         // that series, so that all branches of a signal at one DM drift and merge within the job
@@ -390,7 +412,13 @@ workflow {
             (0..<coherent_dm.size()).each { i ->
                 combined << [cdm: new BigDecimal(coherent_dm[i].toString()), xml: xml_list[i], xml_dp: xml_dp_id_list[i], filstr: filstr_list[i], dm_start: dm_start_list[i], dm_end: dm_end_list[i]]
             }
-            def combined_sorted = combined.sort { a, b -> a.cdm <=> b.cdm }
+            // ties (same coherent DM) are broken by DM range and XML path, so the order does not depend on the
+            // arrival order of the group members (reproducible task hash for -resume)
+            def combined_sorted = combined.sort { a, b ->
+                (a.cdm <=> b.cdm) ?:
+                (new BigDecimal(a.dm_start.toString()) <=> new BigDecimal(b.dm_start.toString())) ?:
+                (a.xml.toString() <=> b.xml.toString())
+            }
             def sorted_coherent_dm = combined_sorted.collect { it.cdm }
             def sorted_xml_list = combined_sorted.collect { it.xml }
             def sorted_xml_dp_id_list = combined_sorted.collect { it.xml_dp }

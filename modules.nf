@@ -585,8 +585,9 @@ process post_folding_heuristics{
  * Hierarchical (two-stage) template bank search.
  *
  * generate_fine_template_bank : cluster the stage-1 candidates of one filterbank/segment in
- *                               Legendre-coefficient space and build a fine template bank
- *                               around every S/N peak (written as peasoup chunk files).
+ *                               Legendre-coefficient space into S/N peaks (clustered_peaks.csv).
+ *                               The fine lattice around every peak is generated in stage 2
+ *                               (hierarchical_fold_search).
  *
  * 'meta' is a map carrying the bookkeeping fields of the group (target_name, utc_start, beam_name,
  * beam_id, filstr, coherent_dm, segment_pepoch, dm_start, dm_end, cfg_base, cfg_hier, ...).
@@ -617,14 +618,11 @@ process generate_fine_template_bank {
     def hs = params.hierarchical_search
     def publish_root = "${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_hier}"
     def optional_args = ""
-    // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS, SPIN PERIOD)
+    // null: taken from the header of the stage-1 template bank (MISMATCH, TOBS)
     if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
-    if (hs.period_min != null)       optional_args += " --period_min ${hs.period_min}"
-    if (hs.clip_to_bank == 0)        optional_args += " --no_bank_clip"
     if (hs.tobs != null)    optional_args += " --tobs ${hs.tobs}"
     if (hs.min_snr != null) optional_args += " --min_snr ${hs.min_snr}"
     if (hs.max_peaks != null)     optional_args += " --max_peaks ${hs.max_peaks}"
-    if (hs.max_templates != null) optional_args += " --max_templates ${hs.max_templates}"
     """
     #!/bin/bash
     set -euo pipefail
@@ -638,9 +636,6 @@ process generate_fine_template_bank {
         --f0tol_fac ${hs.f0tol_fac} \\
         --distance_tol ${hs.distance_tol} \\
         --min_prominence ${hs.min_prominence} \\
-        --search_halfrange_fac ${hs.search_halfrange_fac} \\
-        --search_stepsize_fac ${hs.search_stepsize_fac} \\
-        --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\
         --workers ${task.cpus} ${optional_args}
 
     # one stage-1 XML as header template for the fold search output

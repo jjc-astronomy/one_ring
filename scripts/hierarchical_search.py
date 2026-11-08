@@ -573,7 +573,7 @@ def cmd_cluster(args):
         logging.error("No Keplerian candidates found (pb = 0 everywhere). Stage 1 must be a template bank search.")
         sys.exit(1)
 
-    bank_hdr = resolve_bank_parameters(args, args.input[0], 'clustering / fine grid')
+    resolve_bank_parameters(args, args.input[0], 'clustering', need_period=False)
     tobs = args.tobs if args.tobs is not None else infos[0]['tobs']
     logging.info("Using tobs = %.3f s for the Legendre coefficients and the metric", tobs)
 
@@ -595,49 +595,11 @@ def cmd_cluster(args):
         idx_peak, prominence, nmembers = idx_peak[:args.max_peaks], prominence[:args.max_peaks], nmembers[:args.max_peaks]
 
     peaks = {k: v[idx_peak] for k, v in arrays.items()}
-
-    # Unique peak templates, kept in order of decreasing peak S/N (first occurrence)
-    _, first, inverse = np.unique(peaks['template'], axis=0, return_index=True, return_inverse=True)
-    inverse = np.asarray(inverse).ravel()
-    rank_of_center = np.argsort(np.argsort(first))          # centre id -> position in S/N order
-    centers = peaks['template'][np.sort(first)]
-    peak_center = rank_of_center[inverse]                   # peak -> row of 'centers'
-    logging.info("%d unique peak templates", len(centers))
-
-    halfrange = args.search_halfrange_fac * np.sqrt(args.nominal_mismatch)
-    stepsize = args.search_stepsize_fac * np.sqrt(args.nominal_mismatch)
-    freq_max = 1. / args.period_min
-    if args.lattice == 'adaptive':
-        templates, owner = adaptive_lattice(centers, freq_max, tobs, args.order_highest, halfrange, stepsize, refine=args.lattice_refine)
-    elif args.lattice == 'sample':
-        # the region of a peak is sized at the peak's own spin frequency (the highest among the peaks of the template)
-        f_center = np.zeros(len(centers))
-        np.maximum.at(f_center, peak_center, 1. / peaks['period'])
-        pbb = (bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None
-        if args.sample_nlead == 3:
-            templates, owner = all_roots_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                                 nsamples=args.sample_n, pb_bounds=pbb)
-        else:
-            templates, owner = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                              nlead=args.sample_nlead, nsamples=args.sample_n, workers=args.workers, pb_bounds=pbb)
-    else:
-        metrics = circular_metric(centers, freq_max, tobs, args.order_highest)
-        templates, owner = eigen_lattice(centers, metrics, halfrange, stepsize)
-    if not args.no_bank_clip and bank_hdr:
-        n0 = len(templates)
-        templates, owner = clip_to_bank_region(templates, owner, bank_hdr, centers)
-        logging.info("%d of %d templates kept inside the template bank's parameter region", len(templates), n0)
-    logging.info("%d fine-grid templates generated with the %s lattice (%.1f per peak)",
-                 len(templates), args.lattice, len(templates) / max(1, len(centers)))
-
-    center_used = np.ones(len(centers), dtype=bool)
-    if args.max_templates is not None and len(templates) > args.max_templates:
-        per_center = np.bincount(owner, minlength=len(centers))
-        center_used = np.cumsum(per_center) <= args.max_templates
-        templates = templates[center_used[owner]]
-        logging.info("keeping the %d brightest peaks / %d templates (max_templates = %d)",
-                     center_used.sum(), len(templates), args.max_templates)
-    peak_used = center_used[peak_center]
+    nunique = len(np.unique(peaks['template'], axis=0))
+    logging.info("%d unique peak templates", nunique)
+    # The fine lattice around every peak is generated in stage 2 (foldsearch), not here. Every kept peak is
+    # passed on; the 'used' column stays for foldsearch --only_used.
+    peak_used = np.ones(len(idx_peak), dtype=int)
 
     with open(args.peaks_file, 'w') as f:
         f.write("period,dm,snr,prominence,nmembers,used,pb,a1,phi,t0,angular_velocity,asini_c,orb_phase_rad,file_index\n")
@@ -654,16 +616,11 @@ def cmd_cluster(args):
         ncands_clustered=int(len(arrays['snr'])),
         npeaks_clustered=int(npeaks_clustered),
         npeaks=int(len(idx_peak)),
-        nunique_peak_templates=int(len(centers)),
-        npeak_templates_used=int(center_used.sum()),
-        ntemplates=int(len(templates)),
+        nunique_peak_templates=int(nunique),
         tobs=float(tobs),
         parameters=dict(order_highest=args.order_highest, f0tol_fac=args.f0tol_fac,
                         nominal_mismatch=args.nominal_mismatch, distance_tol=args.distance_tol,
-                        search_halfrange_fac=args.search_halfrange_fac,
-                        search_stepsize_fac=args.search_stepsize_fac, period_min=args.period_min,
-                        lattice=args.lattice, min_snr=args.min_snr, min_prominence=args.min_prominence,
-                        max_peaks=args.max_peaks, max_templates=args.max_templates),
+                        min_snr=args.min_snr, min_prominence=args.min_prominence, max_peaks=args.max_peaks),
     )
     with open(args.summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
@@ -1824,34 +1781,15 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    pc = sub.add_parser('cluster', help='cluster stage-1 candidates into S/N peaks and size the fine grid (stage 2 '
-                                            'regenerates the lattice of every peak in the fold search)')
+    pc = sub.add_parser('cluster', help='cluster stage-1 candidates into S/N peaks (the fine lattice of every peak '
+                                            'is generated in stage 2, foldsearch)')
     pc.add_argument('-i', '--input', nargs='+', required=True, help='stage-1 peasoup XML files')
     pc.add_argument('--peaks_file', default='clustered_peaks.csv')
     pc.add_argument('--summary_file', default='hierarchical_summary.json')
     add_cluster_options(pc)
     pc.add_argument('--min_snr', type=float, default=None, help='optional S/N cut on stage-1 candidates')
-    pc.add_argument('--search_halfrange_fac', type=float, default=0.6,
-                    help='half extent of the fine lattice in units of sqrt(nominal_mismatch) (default 0.6)')
-    pc.add_argument('--search_stepsize_fac', type=float, default=0.2,
-                    help='lattice step in units of sqrt(nominal_mismatch) (default 0.2)')
-    pc.add_argument('--period_min', type=float, default=None,
-                    help='shortest spin period (s) at which the metric is evaluated (default: SPIN PERIOD from the bank header)')
-    pc.add_argument('--no_bank_clip', action='store_true',
-                    help='do not drop fine-grid templates outside the physical region of the bank (PORB, mass limits)')
-    pc.add_argument('--lattice', choices=['linear', 'adaptive', 'sample'], default='linear',
-                    help='linear: lattice from the metric at the peak; adaptive: advancing front in (log omega, log a1, phi) '
-                         'that re-evaluates the metric layer by layer and measures every distance in Legendre-coefficient '
-                         'space (follows the curved valleys that connect aliased orbits)')
-    pc.add_argument('--sample_nlead', type=int, default=3, help='sample lattice: leading orders sampled (default 3, exactly determined)')
-    pc.add_argument('--sample_n', type=int, default=4000, help='sample lattice: samples per peak before pruning (default 4000)')
-    pc.add_argument('--lattice_refine', type=int, default=1,
-                    help='adaptive lattice only: advance the front with a step stepsize/refine and prune the result in '
-                         'Legendre space to the step size (1 = off)')
     pc.add_argument('--max_peaks', type=int, default=None,
-                    help='keep at most this many peaks (the brightest) for the fine grid')
-    pc.add_argument('--max_templates', type=int, default=None,
-                    help='keep at most this many fine-grid templates (whole peaks, brightest first)')
+                    help='keep at most this many peaks (the brightest) for stage 2')
     pc.set_defaults(func=cmd_cluster)
 
     pm = sub.add_parser('merge', help='merge stage-2 chunk XML files into one XML file')
@@ -1872,7 +1810,7 @@ def main():
                          'every peak in every stage-3 refinement iteration (empty string: not written)')
     pf.add_argument('--chunk', type=int, default=0, help='this job processes peaks chunk::nchunks')
     pf.add_argument('--nchunks', type=int, default=1)
-    pf.add_argument('--only_used', action='store_true', help='skip peaks dropped by max_peaks / max_templates')
+    pf.add_argument('--only_used', action='store_true', help='skip peaks marked used = 0 in the peaks file')
     pf.add_argument('--dm_select', type=float, default=None,
                     help='process only the peaks whose nearest DM trial among --dm_list is this DM (one job per time series)')
     pf.add_argument('--dm_list', type=float, nargs='+', default=None, help='all dumped DM trials of the group (with --dm_select)')
