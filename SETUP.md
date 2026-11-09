@@ -135,8 +135,9 @@ and search segment:
    about 0.5 s per peak (`sample_n` samples) and yields roughly 1000 templates per peak,
 4. searches the fine grid (stage 2). The dedispersed time series dumped by the first stage-1 chunk of
    every DM range are searched with
-   `src/hierarchical_fold/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels (built with
-   `src/hierarchical_fold/build_resample_timeseries.sh` inside the peasoup container, or on the fly in the job).
+   `src/hierarchical_fold/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels. It is
+   compiled into the `hierarchical_fold` image (`src/hierarchical_fold/hierarchical_fold.def`, built with
+   `sbatch src/hierarchical_fold/build_hierarchical_fold_sif.sbatch`), not in the jobs.
    With `fold.method = "gpu_fold"` (default) every fine-lattice template is resampled into its own
    emission frame and folded on the device in one pass, at the frequency where the stage-1 FFT
    finds a signal with that orbit when the series is resampled with the peak's template: the

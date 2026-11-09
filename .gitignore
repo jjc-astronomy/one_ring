@@ -24,7 +24,6 @@ semi_coherent_searches.py
 scratch/
 pipeline_notes.txt
 *.csv
-src/hierarchical_fold/resample_timeseries
 include/template_bank/stochastic_2h_distance10.0.txt_ck*.txt
 *.hdf5
 include/template_bank/stochastic_60m_distance5.0*.txt

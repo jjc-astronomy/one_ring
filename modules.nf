@@ -602,7 +602,7 @@ process post_folding_heuristics{
 process hierarchical_fold_search {
     label 'hierarchical_fold'
     // peasoup image: CUDA + nvcc for the resampler, python with numpy for the fold search
-    container "${params.apptainer_images.hierarchical_fold ?: params.apptainer_images.peasoup}"   // CUDA for the resampler + numpy/scipy; falls back to the peasoup image
+    container "${params.apptainer_images.hierarchical_fold}"   // src/hierarchical_fold/hierarchical_fold.def: resample_timeseries + numpy/scipy
     tag "${meta.filstr} ${cfg_name} ${meta.dm_start}_${meta.dm_end}"
 
     publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${cfg_name}/", pattern: "{${output_dp},foldsearch_history.csv,clustered_peaks.csv,hierarchical_summary.json}", mode: 'copy'
@@ -645,7 +645,6 @@ process hierarchical_fold_search {
     if (hs.nominal_mismatch != null) cluster_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)      cluster_args += " --tobs ${hs.tobs}"
     if (hs.max_peaks != null) cluster_args += " --max_peaks ${hs.max_peaks}"
-    def resampler_src = "${projectDir}/src/hierarchical_fold"     // CUDA source of the resampler / GPU fold search
     """
     #!/bin/bash
     set -euo pipefail
@@ -666,12 +665,14 @@ process hierarchical_fold_search {
     cp -L stage1_xml_00001.xml stage1_reference.xml
 
     if [ "${fd.use_resampler}" == "1" ]; then
-        # resampler with peasoup's GPU kernels: prebuilt binary if present, otherwise built here with nvcc
-        if [ -x "${fd.resampler_binary}" ]; then
-            cp "${fd.resampler_binary}" ./resample_timeseries
-        else
-            bash ${resampler_src}/build_resample_timeseries.sh ./resample_timeseries
+        # resampler / GPU fold search compiled into the hierarchical_fold image (src/hierarchical_fold); never built here
+        if ! resampler=\$(command -v resample_timeseries); then
+            >&2 echo "ERROR: resample_timeseries not found in the container \${APPTAINER_CONTAINER:-}; set"
+            >&2 echo "       apptainer_images.hierarchical_fold to an image built with src/hierarchical_fold/build_hierarchical_fold_sif.sbatch"
+            exit 1
         fi
+        echo "resampler: \${resampler}"
+        ln -s "\${resampler}" ./resample_timeseries
     fi
 
     # Re-pair every .dat with its .inf (staged in separate directories) under unique names
