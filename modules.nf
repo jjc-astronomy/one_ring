@@ -638,7 +638,6 @@ process hierarchical_fold_search {
     def cluster_args = ""
     if (hs.nominal_mismatch != null) cluster_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)      cluster_args += " --tobs ${hs.tobs}"
-    if (hs.min_snr != null)   cluster_args += " --min_snr ${hs.min_snr}"
     if (hs.max_peaks != null) cluster_args += " --max_peaks ${hs.max_peaks}"
     def script_dir = new File(hs.script.toString()).getParent()
     """

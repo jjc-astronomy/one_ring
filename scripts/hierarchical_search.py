@@ -577,9 +577,7 @@ def cmd_cluster(args):
     tobs = args.tobs if args.tobs is not None else infos[0]['tobs']
     logging.info("Using tobs = %.3f s for the Legendre coefficients and the metric", tobs)
 
-    keep = arrays['pb'] > 0
-    if args.min_snr is not None:
-        keep &= arrays['snr'] >= args.min_snr
+    keep = arrays['pb'] > 0      # every Keplerian stage-1 candidate is clustered (no S/N cut)
     arrays = {k: v[keep] for k, v in arrays.items()}
     logging.info("%d of %d candidates enter the clustering", len(arrays['snr']), ncands_total)
 
@@ -620,7 +618,7 @@ def cmd_cluster(args):
         tobs=float(tobs),
         parameters=dict(order_highest=args.order_highest, f0tol_fac=args.f0tol_fac,
                         nominal_mismatch=args.nominal_mismatch, distance_tol=args.distance_tol,
-                        min_snr=args.min_snr, min_prominence=args.min_prominence, max_peaks=args.max_peaks),
+                        min_prominence=args.min_prominence, max_peaks=args.max_peaks),
     )
     with open(args.summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
@@ -1787,7 +1785,6 @@ def main():
     pc.add_argument('--peaks_file', default='clustered_peaks.csv')
     pc.add_argument('--summary_file', default='hierarchical_summary.json')
     add_cluster_options(pc)
-    pc.add_argument('--min_snr', type=float, default=None, help='optional S/N cut on stage-1 candidates')
     pc.add_argument('--max_peaks', type=int, default=None,
                     help='keep at most this many peaks (the brightest) for stage 2')
     pc.set_defaults(func=cmd_cluster)
