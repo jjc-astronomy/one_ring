@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <cmath>
+#include <algorithm>
 #include "kernels/kernels.h"
 #include "kernels/defaults.h"
 
@@ -517,7 +518,8 @@ public:
     TimeSeriesContainer<T>::resize(out_nsamps, dm_list.size());
   }
 
-  void write_header_to_file(std::string filename_prefix, SigprocHeader hdr, std::size_t nsamps_override){
+  void write_header_to_file(std::string filename_prefix, SigprocHeader hdr, std::size_t nsamps_override,
+                            std::string const& extra_note = ""){
       std::string ra,dec;
       sigproc_to_hhmmss(hdr.src_raj, ra);
       sigproc_to_ddmmss(hdr.src_dej, dec);
@@ -553,6 +555,7 @@ public:
       ss << " Data analyzed by                       =  " << login << "\n";
       ss << " Any additional notes:\n";
       ss    << "    File written by Peasoup pulsar search package\n";
+      if (!extra_note.empty()) ss << "    " << extra_note << "\n";
       std::ofstream outfile;
       outfile.open(filename.c_str(),std::ifstream::out | std::ifstream::binary);
       ErrorChecker::check_file_error(outfile, filename);
@@ -563,12 +566,41 @@ public:
 
   }
 
-  void write_timeseries_to_file(std::string outdir, std::string filename_prefix, std::size_t idx, SigprocHeader hdr){
+  void write_timeseries_to_file(std::string outdir, std::string filename_prefix, std::size_t idx, SigprocHeader hdr,
+                                bool normalise = false){
     T* ptr = this->get_data_ptr() + (size_t)idx*(size_t)this->nsamps;
     double dm = dm_list[idx];
 
     // Compute number of samples to write (even only)
     std::size_t nsamps_to_write = (this->nsamps % 2 == 0) ? this->nsamps : this->nsamps - 1;
+
+    // Optionally write a normalised copy, (x - median) / (1.4826 * MAD), so that readers (the hierarchical fold
+    // search) need not normalise the series themselves; the trials used by the search are left unchanged.
+    // The .inf note starts with the marker those readers look for: "Normalised in place: (x - median) / (1.4826 * MAD)".
+    std::vector<T> normalised;
+    std::string note;
+    if (normalise && nsamps_to_write > 0) {
+      normalised.assign(ptr, ptr + nsamps_to_write);
+      std::vector<T> tmp(normalised);
+      std::size_t mid = tmp.size() / 2;
+      std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
+      double med = (double) tmp[mid];
+      for (std::size_t i = 0; i < tmp.size(); ++i) tmp[i] = (T) std::fabs((double) normalised[i] - med);
+      std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
+      double scale = 1.4826 * (double) tmp[mid];
+      if (!(scale > 0)) {                       // MAD of 0 (e.g. mostly constant series): fall back to the std
+        double s = 0, s2 = 0;
+        for (std::size_t i = 0; i < normalised.size(); ++i) { double v = (double) normalised[i] - med; s += v; s2 += v * v; }
+        double n = (double) normalised.size(), var = s2 / n - (s / n) * (s / n);
+        scale = var > 0 ? std::sqrt(var) : 1.0;
+      }
+      for (std::size_t i = 0; i < normalised.size(); ++i) normalised[i] = (T) (((double) normalised[i] - med) / scale);
+      ptr = normalised.data();
+      std::stringstream ns;
+      ns << "Normalised in place: (x - median) / (1.4826 * MAD), median " << std::setprecision(9) << med
+         << ", scale " << std::setprecision(9) << scale;
+      note = ns.str();
+    }
 
     std::ofstream outfile;
     std::stringstream file_prefix;
@@ -587,7 +619,7 @@ public:
     std::cout << "Wrote " << filename_prefix << ".dat" << std::endl;
     // Write header, passing overridden nsamples value
     hdr.refdm = dm;
-    write_header_to_file(file_prefix.str(), hdr, nsamps_to_write);
+    write_header_to_file(file_prefix.str(), hdr, nsamps_to_write, note);
     
 
     

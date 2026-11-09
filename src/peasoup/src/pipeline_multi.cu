@@ -640,6 +640,9 @@ int main(int argc, char **argv)
   if(args.timeseries_dump_dir == "" && args.no_search){
     std::cout << "-nosearch is only useful if you are only dumping timeseries. Otherwise it does nothing." << std::endl;
   }
+  if(args.timeseries_dump_dir == "" && args.normalise_dump){
+    std::cout << "--normalise_dump has no effect without -d (no time series are dumped)." << std::endl;
+  }
 
  
   if (args.nsamples > 0 && args.size > 0 && args.nsamples > args.size) ErrorChecker::throw_error("nsamples cannot be > fft size.");
@@ -812,7 +815,7 @@ int main(int argc, char **argv)
       std::cout << "filename without ext: " << filpath.stem().string() << std::endl;
       std::filesystem::create_directories(args.timeseries_dump_dir);
       for (int ii=0;ii<dm_list_chunk.size();ii++){
-        trials.write_timeseries_to_file(args.timeseries_dump_dir, filpath.stem().string(), ii, header);
+        trials.write_timeseries_to_file(args.timeseries_dump_dir, filpath.stem().string(), ii, header, args.normalise_dump);
       }
       if(args.no_search){
         std::cout << "No search requested, exiting" << std::endl;

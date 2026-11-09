@@ -40,6 +40,7 @@ struct CmdLineOptions {
   long nsamples;
   std::string timeseries_dump_dir;
   bool no_search;
+  bool normalise_dump;
   bool distill_circular_orbit_cands;
   bool single_precision_harmonic_sums;
   bool no_deredden;
@@ -224,6 +225,9 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
         false, "", "string",cmd);
 
       TCLAP::SwitchArg arg_no_search("", "nosearch", "Do not search while dumping timeseries, no effect otherwise", cmd);
+      TCLAP::SwitchArg arg_normalise_dump("", "normalise_dump",
+        "Write the dumped time series (-d) normalised to zero median and unit robust std, (x - median) / (1.4826 * MAD), "
+        "and note it in the .inf file. Only the dumped copy is normalised; the search input is unchanged.", cmd);
       TCLAP::SwitchArg arg_distill_circular_orbit_cands("", "distill_circular_orbit_cands", "Distill candidates from circular orbit searches", cmd);
       TCLAP::SwitchArg arg_single_precision_harmonic_sums("", "single_precision_harmonic_sums", "Perform harmonic sums with single precision instead of double.", cmd);
       TCLAP::SwitchArg arg_no_deredden("", "no_deredden", "Skip rednoise removal (running-median whitening) of the Fourier spectrum. The running median rides up onto bright signals whose orbital smear is narrow (Pb >> Tobs), suppressing their S/N before resampling.", cmd);
@@ -277,6 +281,7 @@ bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
       args.nsamples           = arg_nsamples.getValue();
       args.timeseries_dump_dir = arg_timeseries_dump_dir.getValue();
       args.no_search         = arg_no_search.getValue();
+      args.normalise_dump    = arg_normalise_dump.getValue();
       args.distill_circular_orbit_cands = arg_distill_circular_orbit_cands.getValue();
       args.single_precision_harmonic_sums = arg_single_precision_harmonic_sums.getValue();
       args.no_deredden = arg_no_deredden.getValue();
