@@ -721,7 +721,7 @@ class DatabaseUploader:
                                 sys.exit(1)
                         # Add the tscrunch value from the dd_plan
                         if skip_database:
-                            peasoup_id = k * len(peasoup_configs) * len(df) + i * len(peasoup_configs) + j + 1 #255
+                            peasoup_id = k * len(peasoup_configs) + j + 1 #255
                         else:
                             # Insert into DB, retrieve ID
                             peasoup_id = self._insert_peasoup(entry, return_id=True)
@@ -733,8 +733,12 @@ class DatabaseUploader:
                         #json_entry['data_products'] = []  # no data_products yet
                         # Save this fully resolved entry (with peasoup_id) into our list
                         all_peasoup_records.append(entry)
+                    # Peasoup entries depend only on the dd_plan entry and peasoup configs, not on the
+                    # matching row: build them once per DM, otherwise multiple filterbanks at the same DM
+                    # create duplicate peasoup blocks (distinct ids under --skip_database).
+                    break
 
-        
+
         return all_peasoup_records
                         
     def _parse_nextflow_flat_config_from_file(self, file_path):
