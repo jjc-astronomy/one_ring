@@ -1,0 +1,380 @@
+#pragma once
+#include <tclap/CmdLine.h>
+#include <string>
+#include <iostream>
+
+struct CmdLineOptions {
+  std::string infilename;
+  std::string outdir;
+  std::string killfilename;
+  std::string zapfilename;
+  int max_num_threads;
+  unsigned int size;
+  float cdm;
+  float dm_start;
+  float dm_end;
+  float dm_tol;
+  float dm_pulse_width;
+  std::string dm_file;
+  int dedisp_gulp;
+  float host_ram_limit_gb;
+  float acc_start;
+  float acc_end;
+  float acc_tol;
+  float acc_pulse_width;
+  float boundary_5_freq;
+  float boundary_25_freq;
+  float boundary_125_freq;
+  float boundary_625_freq;
+  int nharmonics;
+  int npdmp;
+  int limit;
+  float min_snr;
+  float min_freq;
+  float max_freq;
+  int max_harm;
+  float freq_tol;
+  bool verbose;
+  bool progress_bar;
+  long  start_sample;
+  long nsamples;
+  std::string timeseries_dump_dir;
+  bool no_search;
+  bool distill_circular_orbit_cands;
+  bool single_precision_harmonic_sums;
+  bool no_deredden;
+  bool deredden_post_resample;
+  bool exact_resampler;
+  std::string keplerian_tb_file;
+
+};
+
+struct FFACmdLineOptions {
+  std::string infilename;
+  std::string outfilename;
+  std::string killfilename;
+  int max_num_threads;
+  unsigned int nstreams;
+  float dm_start;
+  float dm_end;
+  float dm_tol;
+  float dm_pulse_width;
+  float p_start;
+  float p_end;
+  float min_dc;
+  bool verbose;
+  bool progress_bar;
+};
+
+
+std::string get_utc_str()
+{
+  char buf[128];
+  std::time_t t = std::time(NULL);
+  std::strftime(buf, 128, "./%Y-%m-%d-%H:%M_peasoup/", std::gmtime(&t));
+  return std::string(buf);
+}
+
+std::string get_default_ffa_output_filename()
+{
+  char buf[128];
+  std::time_t t = std::time(NULL);
+  std::strftime(buf, 128, "%Y-%m-%d-%H:%M_ffaster.output", std::gmtime(&t));
+  return std::string(buf);
+}
+
+bool read_cmdline_options(CmdLineOptions& args, int argc, char **argv)
+{
+  try
+    {
+      TCLAP::CmdLine cmd("Peasoup - a GPU pulsar search pipeline that performs Polynomial and Keplerian parameter searches", ' ', "2.0");
+
+      TCLAP::ValueArg<std::string> arg_infilename("i", "inputfile",
+						  "File to process (.fil)",
+                                                  true, "", "string", cmd);
+
+      TCLAP::ValueArg<std::string> arg_outdir("o", "outdir",
+					      "The output directory",
+					      false, get_utc_str(), "string",cmd);
+
+      TCLAP::ValueArg<std::string> arg_killfilename("k", "killfile",
+						    "Channel mask file",
+						    false, "", "string",cmd);
+
+      TCLAP::ValueArg<std::string> arg_zapfilename("z", "zapfile",
+                                                   "Birdie list file",
+                                                   false, "", "string",cmd);
+
+      TCLAP::ValueArg<int> arg_max_num_threads("t", "num_threads",
+                                               "The number of GPUs to use",
+                                               false, 14, "int", cmd);
+
+      TCLAP::ValueArg<int> arg_limit("", "limit",
+				     "upper limit on number of candidates to write out",
+				     false, 1000, "int", cmd);
+
+      TCLAP::ValueArg<size_t> arg_size("", "fft_size",
+                                       "Transform size to use (defaults to lower power of two)",
+                                       false, 0, "size_t", cmd);
+
+      TCLAP::ValueArg<std::string> arg_dm_file("", "dm_file",
+                                          "filename with dm list",
+                                          false, "none", "string", cmd);
+      TCLAP::ValueArg<float> arg_cdm("", "cdm",
+                                          "Coherent DM of filterbank file",
+                                          false, 0.0, "float", cmd);
+      TCLAP::ValueArg<float> arg_dm_start("", "dm_start",
+                                          "First DM to dedisperse to",
+                                          false, 0.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_dm_end("", "dm_end",
+                                        "Last DM to dedisperse to",
+                                        false, 0.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_dm_tol("", "dm_tol",
+                                        "DM smearing tolerance (1.11=10%)",
+                                        false, 1.11, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_dm_pulse_width("", "dm_pulse_width",
+                                                "Minimum pulse width for which dm_tol is valid",
+                                                false, 64.0, "float (us)",cmd);
+
+      TCLAP::ValueArg<float> arg_host_ram_limit_gb("", "ram_limit_gb",
+                                                "The maximum host RAM to be used during processing. Default: 20GB (affects the number of file reads to be made during dedispersion)",
+                                                false, 20.0, "float", cmd);
+
+      TCLAP::ValueArg<int> arg_dedisp_gulp("", "dedisp_gulp",
+                                                "Number of samples to read at a time during dedispersion, default: 1 million",
+                                                false, 1e6, "int", cmd);
+
+      TCLAP::ValueArg<float> arg_acc_start("", "acc_start",
+					   "First acceleration to resample to",
+					   false, 0.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_acc_end("", "acc_end",
+					 "Last acceleration to resample to",
+					 false, 0.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_acc_tol("", "acc_tol",
+					 "Acceleration smearing tolerance (1.11=10%)",
+					 false, 1.10, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_acc_pulse_width("", "acc_pulse_width",
+                                                 "Minimum pulse width for which acc_tol is valid",
+						 false, 64.0, "float (us)",cmd);
+      
+
+
+      TCLAP::ValueArg<float> arg_boundary_5_freq("", "boundary_5_freq",
+                                                 "Frequency at which to switch from median5 to median25",
+                                                 false, 0.05, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_boundary_25_freq("", "boundary_25_freq",
+						  "Frequency at which to switch from median25 to median125",
+						  false, 0.5, "float", cmd);
+      TCLAP::ValueArg<float> arg_boundary_125_freq("", "boundary_125_freq",
+                                                   "Frequency (Hz) above which 625-bin running medians are used for whitening (default: off)",
+                                                   false, 1e30, "float", cmd);
+      TCLAP::ValueArg<float> arg_boundary_625_freq("", "boundary_625_freq",
+                                                   "Frequency (Hz) above which 3125-bin running medians are used for whitening (default: off; requires --boundary_125_freq)",
+                                                   false, 1e30, "float", cmd);
+
+      TCLAP::ValueArg<int> arg_nharmonics("n", "nharmonics",
+                                          "Number of harmonic sums to perform",
+                                          false, 4, "int", cmd);
+
+      TCLAP::ValueArg<int> arg_npdmp("", "npdmp",
+                                     "Number of candidates to fold and pdmp",
+                                     false, 0, "int", cmd);
+
+      TCLAP::ValueArg<float> arg_min_snr("m", "min_snr",
+                                         "The minimum S/N for a candidate",
+                                         false, 9.0, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_min_freq("", "min_freq",
+                                          "Lowest Fourier freqency to consider",
+                                          false, 0.1, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_max_freq("", "max_freq",
+                                          "Highest Fourier freqency to consider",
+                                          false, 1100.0, "float",cmd);
+
+      TCLAP::ValueArg<int> arg_max_harm("", "max_harm_match",
+                                        "Maximum harmonic for related candidates",
+                                        false, 16, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_freq_tol("", "freq_tol",
+                                          "Tolerance for distilling frequencies (0.0001 = 0.01%)",
+                                          false, 0.0001, "float",cmd);
+
+      TCLAP::SwitchArg arg_verbose("v", "verbose", "verbose mode", cmd);
+
+      TCLAP::SwitchArg arg_progress_bar("p", "progress_bar", "Enable progress bar for DM search", cmd);
+
+      TCLAP::ValueArg<unsigned int> arg_start_sample("", "start_sample",
+						 "Start from this sample",
+						 false, 0, "long", cmd);  
+
+      TCLAP::ValueArg<unsigned int> arg_nsamples("", "nsamples",
+						 "Only take this many samples from start sample. Default: Until EOF",
+						 false, 0, "long", cmd);     
+             
+      TCLAP::ValueArg<std::string> arg_timeseries_dump_dir("d", "timeseries_dump_dir",
+        "dump dedispersed time series to this directory",
+        false, "", "string",cmd);
+
+      TCLAP::SwitchArg arg_no_search("", "nosearch", "Do not search while dumping timeseries, no effect otherwise", cmd);
+      TCLAP::SwitchArg arg_distill_circular_orbit_cands("", "distill_circular_orbit_cands", "Distill candidates from circular orbit searches", cmd);
+      TCLAP::SwitchArg arg_single_precision_harmonic_sums("", "single_precision_harmonic_sums", "Perform harmonic sums with single precision instead of double.", cmd);
+      TCLAP::SwitchArg arg_no_deredden("", "no_deredden", "Skip rednoise removal (running-median whitening) of the Fourier spectrum. The running median rides up onto bright signals whose orbital smear is narrow (Pb >> Tobs), suppressing their S/N before resampling.", cmd);
+      TCLAP::SwitchArg arg_deredden_post_resample("", "deredden_post_resample",
+        "Whiten the Fourier spectrum of every resampled time series (after the acceleration / orbital resampling) "
+        "instead of once before resampling. The running median is then computed on a spectrum in which a matching "
+        "binary pulsar is a narrow peak, so it is not removed together with the red noise. Implies no whitening "
+        "before resampling (birdie zapping is still applied there). Costs a few memory-bound passes per trial.", cmd);
+      TCLAP::SwitchArg arg_exact_resampler("", "exact_resampler", "Run exact resampler using linear interpolation", cmd);
+
+
+      TCLAP::ValueArg<std::string> arg_keplerian_template_bank_filename("K", "keplerian_template_bank_file",
+                                                                         "filename of keplerian template bank",
+                                                                         false, "none", "string", cmd);
+      
+
+      cmd.parse(argc, argv);
+      args.infilename        = arg_infilename.getValue();
+      args.outdir            = arg_outdir.getValue();
+      args.killfilename      = arg_killfilename.getValue();
+      args.zapfilename       = arg_zapfilename.getValue();
+      args.max_num_threads   = arg_max_num_threads.getValue();
+      args.limit             = arg_limit.getValue();
+      args.size              = arg_size.getValue();
+      args.dm_file           = arg_dm_file.getValue();
+      args.cdm               = arg_cdm.getValue();
+      args.dm_end            = arg_dm_end.getValue();
+      args.dm_start          = arg_dm_start.getValue();
+      args.dm_tol            = arg_dm_tol.getValue();
+      args.dm_pulse_width    = arg_dm_pulse_width.getValue();
+      args.host_ram_limit_gb = arg_host_ram_limit_gb.getValue();
+      args.dedisp_gulp       = arg_dedisp_gulp.getValue();
+      args.acc_start         = arg_acc_start.getValue();
+      args.acc_end           = arg_acc_end.getValue();
+      args.acc_tol           = arg_acc_tol.getValue();
+      args.acc_pulse_width   = arg_acc_pulse_width.getValue();
+      args.boundary_5_freq   = arg_boundary_5_freq.getValue();
+      args.boundary_25_freq  = arg_boundary_25_freq.getValue();
+      args.boundary_125_freq = arg_boundary_125_freq.getValue();
+      args.boundary_625_freq = arg_boundary_625_freq.getValue();
+      args.nharmonics        = arg_nharmonics.getValue();
+      args.npdmp             = arg_npdmp.getValue();
+      args.min_snr           = arg_min_snr.getValue();
+      args.min_freq          = arg_min_freq.getValue();
+      args.max_freq          = arg_max_freq.getValue();
+      args.max_harm          = arg_max_harm.getValue();
+      args.freq_tol          = arg_freq_tol.getValue();
+      args.verbose           = arg_verbose.getValue();
+      args.progress_bar      = arg_progress_bar.getValue();
+      args.start_sample      = arg_start_sample.getValue();
+      args.nsamples           = arg_nsamples.getValue();
+      args.timeseries_dump_dir = arg_timeseries_dump_dir.getValue();
+      args.no_search         = arg_no_search.getValue();
+      args.distill_circular_orbit_cands = arg_distill_circular_orbit_cands.getValue();
+      args.single_precision_harmonic_sums = arg_single_precision_harmonic_sums.getValue();
+      args.no_deredden = arg_no_deredden.getValue();
+      args.deredden_post_resample = arg_deredden_post_resample.getValue();
+      args.exact_resampler   = arg_exact_resampler.getValue();
+      args.keplerian_tb_file = arg_keplerian_template_bank_filename.getValue();
+
+
+    }catch (TCLAP::ArgException &e) {
+    std::cerr << "Error: " << e.error() << " for arg " << e.argId()
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+
+bool read_ffa_cmdline_options(FFACmdLineOptions& args, int argc, char **argv)
+{
+  try
+    {
+      TCLAP::CmdLine cmd("Peasoup/FFAster extension - a GPU FFA pulsar search pipeline", ' ', "1.0");
+
+      TCLAP::ValueArg<std::string> arg_infilename("i", "inputfile",
+                                                  "File to process (.fil)",
+                                                  true, "", "string", cmd);
+
+      TCLAP::ValueArg<std::string> arg_outfilename("o", "outfilename",
+						   "The output filename",
+						   false, get_default_ffa_output_filename(),
+						   "string",cmd);
+
+      TCLAP::ValueArg<std::string> arg_killfilename("k", "killfile",
+                                                    "Channel mask file",
+                                                    false, "", "string",cmd);
+
+      TCLAP::ValueArg<int> arg_max_num_threads("t", "num_threads",
+                                               "The number of GPUs to use",
+                                               false, 14, "int", cmd);
+
+      TCLAP::ValueArg<unsigned int> arg_nstreams("", "nstreams",
+						 "The number of CUDA streams to use",
+						 false, 16, "unsigned int", cmd);
+
+           
+
+      /*TCLAP::ValueArg<float> arg_dm_start("", "dm_start",
+                                          "First DM to dedisperse to",
+                                          false, 0.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_dm_end("", "dm_end",
+                                        "Last DM to dedisperse to",
+                                        false, 100.0, "float", cmd);
+
+      TCLAP::ValueArg<float> arg_dm_tol("", "dm_tol",
+                                        "DM smearing tolerance (1.11=10%)",
+                                        false, 1.10, "float",cmd);
+
+      TCLAP::ValueArg<float> arg_dm_pulse_width("", "dm_pulse_width",
+                                                "Minimum pulse width for which dm_tol is valid",
+                                                false, 64.0, "float (us)",cmd);*/
+
+      TCLAP::ValueArg<float> arg_p_start("", "p_start",
+					 "Start period for FFA search",
+					 false, 0.8, "float (s)",cmd);
+
+      TCLAP::ValueArg<float> arg_p_end("", "p_end",
+				       "End period for FFA search",
+				       false, 20.0, "float (s)",cmd);
+
+      TCLAP::ValueArg<float> arg_min_dc("", "min_dc",
+					"Minimum duty cycle",
+					false, 0.001, "float (fraction)",cmd);
+                       
+
+      TCLAP::SwitchArg arg_verbose("v", "verbose", "verbose mode", cmd);
+
+      TCLAP::SwitchArg arg_progress_bar("p", "progress_bar", "Enable progress bar for DM search", cmd);
+
+      cmd.parse(argc, argv);
+      args.infilename        = arg_infilename.getValue();
+      args.outfilename       = arg_outfilename.getValue();
+      args.killfilename      = arg_killfilename.getValue();
+      args.max_num_threads   = arg_max_num_threads.getValue();
+      args.nstreams          = arg_nstreams.getValue();
+      //args.dm_start          = arg_dm_start.getValue();
+      //args.dm_end            = arg_dm_end.getValue();
+      //args.dm_tol            = arg_dm_tol.getValue();
+      //args.dm_pulse_width    = arg_dm_pulse_width.getValue();
+      args.p_start           = arg_p_start.getValue();
+      args.p_end             = arg_p_end.getValue();
+      args.min_dc            = arg_min_dc.getValue();
+      args.verbose           = arg_verbose.getValue();
+      args.progress_bar      = arg_progress_bar.getValue();
+
+    }catch (TCLAP::ArgException &e) {
+    std::cerr << "Error: " << e.error() << " for arg " << e.argId()
+              << std::endl;
+    return false;
+  }
+  return true;
+}
