@@ -1,45 +1,63 @@
 # Image for the hierarchical search stages 2 and 3 (process hierarchical_fold_search, label 'hierarchical_fold').
 #
-# Contains:
-#   /usr/local/bin/resample_timeseries   GPU resampler / fold search, compiled here from resample_timeseries.cu
-#   python3 with numpy, scipy (KD-tree clustering), threadpoolctl
-# The jobs do not compile anything: they use the resample_timeseries binary of this image.
+# Two stages:
+#   build  resample_timeseries is compiled in a CUDA development image with nvcc (default: peasoup_4f0472a_scipy.sif).
+#          nvcc links the CUDA runtime statically, so the binary needs no CUDA library at run time.
+#   final  plain Ubuntu 22.04 (same as the build image) with
+#            /usr/local/bin/resample_timeseries
+#            python3 (as 'python') with numpy, scipy (KD-tree clustering) and threadpoolctl
+#          The NVIDIA driver (libcuda) comes from the host through 'apptainer --nv'. The jobs compile nothing.
 #
-# The base image only has to provide nvcc (CUDA toolkit) and python3 with numpy, scipy and threadpoolctl; the
-# peasoup binary in it is not used by stages 2 and 3.
-#
-# Build (from this directory, see build_hierarchical_fold_sif.sbatch):
-#   apptainer build --fakeroot --build-arg BASE_IMAGE=<base.sif> --build-arg GIT_COMMIT=<hash> \
-#       hierarchical_fold_<hash>.sif hierarchical_fold.def
+# Build on a compute node: sbatch src/build_sif.sbatch hierarchical_fold   (from the repository root)
 
 Bootstrap: localimage
-From: {{ BASE_IMAGE }}
+From: {{ DEVEL_IMAGE }}
+Stage: build
 
 %arguments
-    BASE_IMAGE=/hercules/u/jijin/singularity_images/peasoup_4f0472a_scipy.sif
+    DEVEL_IMAGE=/hercules/u/jijin/singularity_images/peasoup_4f0472a_scipy.sif
     GIT_COMMIT=unknown
 
 %files
-    resample_timeseries.cu /software/hierarchical_fold/resample_timeseries.cu
-    build_resample_timeseries.sh /software/hierarchical_fold/build_resample_timeseries.sh
+    resample_timeseries.cu /build/hierarchical_fold/resample_timeseries.cu
+    build_resample_timeseries.sh /build/hierarchical_fold/build_resample_timeseries.sh
 
 %post
     set -e
     export PATH=/usr/local/cuda/bin:$PATH
     nvcc --version | tail -1
-    bash /software/hierarchical_fold/build_resample_timeseries.sh /usr/local/bin/resample_timeseries
+    mkdir -p /stage
+    bash /build/hierarchical_fold/build_resample_timeseries.sh /stage/resample_timeseries
+    ldd /stage/resample_timeseries
+
+Bootstrap: docker
+From: ubuntu:22.04
+Stage: final
+
+%files from build
+    /stage/resample_timeseries /usr/local/bin/resample_timeseries
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends python3 python3-pip python-is-python3
+    rm -rf /var/lib/apt/lists/*
+    pip3 install --no-cache-dir numpy==2.2.6 scipy==1.15.3 threadpoolctl==3.7.0
     chmod 755 /usr/local/bin/resample_timeseries
-    # checks: the binary runs (usage lists the --search mode) and the python packages of stages 2 and 3 import
-    /usr/local/bin/resample_timeseries 2>&1 | grep -q -- '--search'
-    python3 -c "import numpy, scipy, scipy.spatial, scipy.special, threadpoolctl; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"
+    # checks: libraries resolve, the binary runs (usage lists --search), the python packages import
+    if ldd /usr/local/bin/resample_timeseries | grep 'not found'; then echo "missing libraries" >&2; exit 1; fi
+    resample_timeseries > /tmp/usage.txt 2>&1 || true
+    grep -q -- --search /tmp/usage.txt
+    rm -f /tmp/usage.txt
+    python -c "import numpy, scipy, scipy.spatial, scipy.special, threadpoolctl; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"
 
 %labels
     Author jjiang@mpifr-bonn.mpg.de
-    Description "one_ring hierarchical search stages 2-3: resample_timeseries (GPU fold search) + numpy/scipy"
+    Description "one_ring stages 2-3: resample_timeseries (GPU fold search) + numpy/scipy, no CUDA toolkit"
     OneRingCommit {{ GIT_COMMIT }}
-    BaseImage {{ BASE_IMAGE }}
+    DevelImage {{ DEVEL_IMAGE }}
 
 %help
     Stage 2/3 image of the one_ring hierarchical search. resample_timeseries is built from
-    src/hierarchical_fold/resample_timeseries.cu (one_ring commit {{ GIT_COMMIT }}) and installed in /usr/local/bin.
-    The source is kept in /software/hierarchical_fold.
+    src/hierarchical_fold/resample_timeseries.cu (one_ring commit {{ GIT_COMMIT }}); CUDA runtime linked statically.

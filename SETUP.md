@@ -137,7 +137,9 @@ and search segment:
    every DM range are searched with
    `src/hierarchical_fold/resample_timeseries.cu`, a tool built on peasoup's own GPU resampling kernels. It is
    compiled into the `hierarchical_fold` image (`src/hierarchical_fold/hierarchical_fold.def`, built with
-   `sbatch src/hierarchical_fold/build_hierarchical_fold_sif.sbatch`), not in the jobs.
+   `sbatch src/build_sif.sbatch hierarchical_fold`), not in the jobs. Stage 1 runs in the `peasoup` image
+   (`src/peasoup/peasoup.def`, `sbatch src/build_sif.sbatch peasoup`). Both images are compiled in a CUDA
+   development image and contain only the binaries, their runtime libraries and python (no CUDA toolkit).
    With `fold.method = "gpu_fold"` (default) every fine-lattice template is resampled into its own
    emission frame and folded on the device in one pass, at the frequency where the stage-1 FFT
    finds a signal with that orbit when the series is resampled with the peak's template: the

@@ -668,7 +668,7 @@ process hierarchical_fold_search {
         # resampler / GPU fold search compiled into the hierarchical_fold image (src/hierarchical_fold); never built here
         if ! resampler=\$(command -v resample_timeseries); then
             >&2 echo "ERROR: resample_timeseries not found in the container \${APPTAINER_CONTAINER:-}; set"
-            >&2 echo "       apptainer_images.hierarchical_fold to an image built with src/hierarchical_fold/build_hierarchical_fold_sif.sbatch"
+            >&2 echo "       apptainer_images.hierarchical_fold to an image built with: sbatch src/build_sif.sbatch hierarchical_fold"
             exit 1
         fi
         echo "resampler: \${resampler}"

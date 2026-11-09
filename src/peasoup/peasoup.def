@@ -1,0 +1,77 @@
+# Stage-1 image of the one_ring hierarchical search (process peasoup): peasoup without the CUDA toolkit.
+#
+# Two stages:
+#   build  peasoup is compiled from this directory (src/peasoup) in a CUDA development image that has nvcc and the
+#          dedisp library (default: peasoup_4f0472a_scipy.sif).
+#   final  plain Ubuntu 22.04 (same as the build image) with only what the peasoup task runs:
+#            /usr/local/bin/peasoup
+#            /opt/peasoup/lib: libcudart.so.12, libcufft.so.11, libdedisp.so.1 (copied from the build stage)
+#            python3 (as 'python') with numpy, uuidgen
+#          The NVIDIA driver (libcuda) comes from the host through 'apptainer --nv'.
+#
+# Build on a compute node: sbatch src/build_sif.sbatch peasoup   (from the repository root)
+
+Bootstrap: localimage
+From: {{ DEVEL_IMAGE }}
+Stage: build
+
+%arguments
+    DEVEL_IMAGE=/hercules/u/jijin/singularity_images/peasoup_4f0472a_scipy.sif
+    GIT_COMMIT=unknown
+
+%files
+    Makefile /build/peasoup/Makefile
+    Makefile.inc /build/peasoup/Makefile.inc
+    src /build/peasoup/src
+    include /build/peasoup/include
+
+%post
+    set -e
+    export PATH=/usr/local/cuda/bin:$PATH
+    nvcc --version | tail -1
+    cd /build/peasoup
+    make -B -j8
+    mkdir -p /stage/lib
+    cp bin/peasoup /stage/peasoup
+    # the shared libraries peasoup needs beyond the system ones (dereferenced: real files, soname as file name)
+    cp -L /usr/local/lib/libdedisp.so.1 /stage/lib/
+    cp -L /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.12 /stage/lib/
+    cp -L /usr/local/cuda/targets/x86_64-linux/lib/libcufft.so.11 /stage/lib/
+    ldd bin/peasoup
+
+Bootstrap: docker
+From: ubuntu:22.04
+Stage: final
+
+%files from build
+    /stage/peasoup /usr/local/bin/peasoup
+    /stage/lib /opt/peasoup/lib
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends python3 python3-pip python-is-python3 uuid-runtime
+    rm -rf /var/lib/apt/lists/*
+    pip3 install --no-cache-dir numpy==2.2.6
+    echo /opt/peasoup/lib > /etc/ld.so.conf.d/peasoup.conf
+    ldconfig
+    chmod 755 /usr/local/bin/peasoup
+    # checks: every library resolves, the options of this fork are there, the python of the task works
+    if ldd /usr/local/bin/peasoup | grep 'not found'; then echo "missing libraries" >&2; exit 1; fi
+    peasoup --help > /tmp/help.txt 2>&1 || true
+    grep -q -- --deredden_post_resample /tmp/help.txt
+    grep -q -- --normalise_dump /tmp/help.txt
+    rm -f /tmp/help.txt
+    python -c "import numpy; print('numpy', numpy.__version__)"
+    command -v uuidgen
+
+%labels
+    Author jjiang@mpifr-bonn.mpg.de
+    Description "one_ring stage 1: peasoup (fork 4f0472a + --normalise_dump), runtime libraries only"
+    OneRingCommit {{ GIT_COMMIT }}
+    DevelImage {{ DEVEL_IMAGE }}
+
+%help
+    peasoup built from src/peasoup of one_ring (commit {{ GIT_COMMIT }}): the post-resample-deredden fork
+    (4f0472a) plus --normalise_dump. Contains only the runtime libraries (cudart, cufft, dedisp); no CUDA toolkit.
