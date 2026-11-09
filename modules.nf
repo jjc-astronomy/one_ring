@@ -108,7 +108,7 @@ process peasoup {
     
     output:
     tuple path(output_dp), env(output_dp_id), env(publish_dir), env(segment_pepoch), val(beam_name), val(coherent_dm), env(cfg_name), val(utc_start), val(target_name), val(beam_id), val(filstr), val(program_args.dm_start), val(program_args.dm_end), emit: results
-    // Dedispersed time series dumped by peasoup (-d), one .dat/.inf pair per DM trial; only when
+    // Dedispersed time series dumped by peasoup (-d) and normalised in place, one .dat/.inf pair per DM trial; only when
     // program_args.dump_timeseries == 1 (the hierarchical search sets it for the first bank chunk of every DM range).
     tuple val(filstr), val(utc_start), val(beam_id), val(program_args), path("timeseries/*"), optional: true, emit: timeseries
 
@@ -215,6 +215,12 @@ process peasoup {
 
     # Check if peasoup command succeeded
     check_status
+    if [ "${program_args.dump_timeseries}" == "1" ]; then
+        # normalise the dumped series once, in place (only the normalised series are published); the marker in
+        # their .inf tells the stage-2 fold search not to normalise them again
+        python ${params.hierarchical_search.script} normalise timeseries/*.dat
+        check_status
+    fi
     # Generate a UUID for the output file
     output_dp_id=\$(uuidgen)
     check_status
@@ -639,7 +645,7 @@ process hierarchical_fold_search {
     if (hs.nominal_mismatch != null) cluster_args += " --nominal_mismatch ${hs.nominal_mismatch}"
     if (hs.tobs != null)      cluster_args += " --tobs ${hs.tobs}"
     if (hs.max_peaks != null) cluster_args += " --max_peaks ${hs.max_peaks}"
-    def script_dir = new File(hs.script.toString()).getParent()
+    def resampler_src = "${projectDir}/src/hierarchical_fold"     // CUDA source of the resampler / GPU fold search
     """
     #!/bin/bash
     set -euo pipefail
@@ -664,7 +670,7 @@ process hierarchical_fold_search {
         if [ -x "${fd.resampler_binary}" ]; then
             cp "${fd.resampler_binary}" ./resample_timeseries
         else
-            bash ${script_dir}/build_resample_timeseries.sh ./resample_timeseries
+            bash ${resampler_src}/build_resample_timeseries.sh ./resample_timeseries
         fi
     fi
 

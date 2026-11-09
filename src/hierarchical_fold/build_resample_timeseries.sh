@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the time series resampler (peasoup kernels) with nvcc, e.g. inside the peasoup container:
-#   apptainer exec <peasoup image> bash scripts/build_resample_timeseries.sh [output path]
+#   apptainer exec <peasoup image> bash src/hierarchical_fold/build_resample_timeseries.sh [output path]
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 out="${1:-$here/resample_timeseries}"

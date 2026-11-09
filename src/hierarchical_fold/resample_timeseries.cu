@@ -39,7 +39,8 @@
  *       at f0 (phase = f0 * idx * tsamp) into NSUB sub-integrations of NBINS bins, in one pass per template.
  *       profiles.bin: for every template float32 [NSUB][NBINS] summed intensities followed by float32 [NSUB][NBINS]
  *       noise variances of the bins (1 per sample for nearest, (1-w)^2+w^2 per interpolated sample), so that
- *       profile/sqrt(variance) has unit noise. The series is normalised (median, MAD) before folding.
+ *       profile/sqrt(variance) has unit noise. The series is normalised (median, MAD) before folding, unless its
+ *       .inf carries the marker written by 'hierarchical_search.py normalise' (normalised once after the dump).
  *
  * Build (inside the peasoup container):  nvcc -O3 -o resample_timeseries resample_timeseries.cu
  */
@@ -562,7 +563,9 @@ int main(int argc, char** argv) {
             FoldTemplate t; std::istringstream ls(line);
             if (ls >> t.n >> t.a1 >> t.phi >> t.f0) fts.push_back(t);
         }
-        normalise_series(in);
+        // series normalised once after the dump (hierarchical_search.py normalise) carry a marker in their .inf
+        bool prenormalised = inf_text.find("Normalised in place: (x - median) / (1.4826 * MAD)") != std::string::npos;
+        if (!prenormalised) normalise_series(in);
         bool linear = (mode == "linear");
         // frequency offsets (Fourier bins of 1/tobs) and boxcar widths for --search
         std::vector<double> dfs; for (double d = -df_halfrange; d <= df_halfrange + 1e-9; d += df_step) dfs.push_back(d);
@@ -570,7 +573,8 @@ int main(int argc, char** argv) {
         std::vector<double> t_frac(nsub); for (int j = 0; j < nsub; ++j) t_frac[j] = (j + 0.5) / nsub;   // t_j / tobs
         if (nbins > 1024) { std::cerr << "nbins must be <= 1024\n"; return 1; }
         std::cerr << "resample_timeseries " << (do_search ? "search" : "fold") << ": " << size << " samples, " << fts.size()
-                  << " templates, nsub " << nsub << ", nbins " << nbins << ", " << mode << ", " << (gpu0 ? "GPU" : "CPU");
+                  << " templates, nsub " << nsub << ", nbins " << nbins << ", " << mode << ", " << (gpu0 ? "GPU" : "CPU")
+                  << (prenormalised ? ", input already normalised" : ", input normalised here");
         if (do_search) std::cerr << ", " << dfs.size() << " frequency offsets, " << widths.size() << " widths";
         std::cerr << std::endl;
         std::ofstream of(fold_out, do_search ? std::ios::out : std::ios::binary);

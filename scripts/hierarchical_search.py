@@ -906,7 +906,18 @@ def read_presto_inf(inf_file):
             info['nsamples'] = int(val)
         elif key.startswith('dispersion measure'):
             info['dm'] = float(val)
+    info['normalised'] = is_normalised_inf(inf_file)
     return info
+
+
+# Marker appended to the .inf of a dumped time series once it has been normalised in place (cmd_normalise, run in the
+# peasoup task right after the dump). Readers (this script and resample_timeseries) then skip their own normalisation.
+NORMALISED_MARKER = 'Normalised in place: (x - median) / (1.4826 * MAD)'
+
+
+def is_normalised_inf(inf_file):
+    with open(inf_file) as f:
+        return NORMALISED_MARKER in f.read()
 
 
 def read_presto_timeseries(dat_file):
@@ -940,6 +951,32 @@ def normalise_timeseries(ts):
     if mad <= 0:
         mad = ts.std() or 1.0
     return ((ts - med) / mad).astype(np.float32)
+
+
+def cmd_normalise(args):
+    """
+    Normalise dumped time series in place (robust zero median, unit MAD-based std, float32), once per DM trial, and
+    mark their .inf files so that stage 2 does not normalise them again. Series already marked are skipped.
+    """
+    for dat in args.input:
+        inf = os.path.splitext(dat)[0] + '.inf'
+        if is_normalised_inf(inf):
+            logging.info("%s: already normalised, skipped", dat)
+            continue
+        info = read_presto_inf(inf)
+        data = np.fromfile(dat, dtype=np.float32)
+        if 'nsamples' in info:
+            data = data[:info['nsamples']]
+        med = np.median(data)
+        data -= med                                   # in place, float32: no float64 copies of long series
+        mad = float(np.median(np.abs(data))) * 1.4826
+        if mad <= 0:
+            mad = float(data.std()) or 1.0
+        data /= np.float32(mad)
+        data.tofile(dat)
+        with open(inf, 'a') as f:
+            f.write("    %s, median %.9g, scale %.9g\n" % (NORMALISED_MARKER, med, mad))
+        logging.info("%s: %d samples normalised (median %.6g, 1.4826*MAD %.6g)", dat, len(data), med, mad)
 
 
 def fold_subints(ts, tsamp, f0, template, nsub, nbins):
@@ -1320,7 +1357,11 @@ def cmd_foldsearch(args):
     series = {}
     for dat in args.timeseries:
         data, info = read_presto_timeseries(dat)
-        series[round(info['dm'], 4)] = (None if args.resampler else normalise_timeseries(data), info, dat)
+        if not args.resampler:          # with the resampler the tool reads the .dat itself
+            data = data if info['normalised'] else normalise_timeseries(data)
+        series[round(info['dm'], 4)] = (None if args.resampler else data, info, dat)
+        if not info['normalised']:
+            logging.warning("%s is not normalised (no marker in its .inf): normalised here / by the resampler on every call", dat)
         logging.info("%s: DM %.4f, %d samples, tsamp %.9g", dat, info['dm'], len(data), info['tsamp'])
     if args.resampler:
         logging.info("time series are resampled per peak with %s (%s)", args.resampler, args.resampler_mode)
@@ -1795,6 +1836,11 @@ def main():
     pm.add_argument('--cluster', action='store_true', help='keep only S/N peaks in a_n space')
     add_cluster_options(pm)
     pm.set_defaults(func=cmd_merge)
+
+    pn = sub.add_parser('normalise', help='normalise dumped time series in place (median, MAD) and mark their .inf '
+                                          'files; run once after the dump so that stage 2 does not repeat it')
+    pn.add_argument('input', nargs='+', help='.dat files (the .inf next to each is read and marked)')
+    pn.set_defaults(func=cmd_normalise)
 
     pf = sub.add_parser('foldsearch', help='stage 2 by folding the dumped time series into sub-integrations and aligning '
                                            'them per fine-grid template (LOKI scheme)')
