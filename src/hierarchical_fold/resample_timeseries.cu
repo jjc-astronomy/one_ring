@@ -190,12 +190,23 @@ __global__ void resample_circular_linear_kernel(float* input_d, float* output_d,
 
 /* resample (nearest or linear) and fold in one pass: one block per sub-integration, shared-memory histogram.
    prof_d accumulates the (unit-variance) samples, cnt_d the noise variance of each bin: 1 per sample for nearest
-   neighbour, (1-w)^2 + w^2 for a linearly interpolated sample, so that prof/sqrt(cnt) has unit noise. */
+   neighbour, (1-w)^2 + w^2 for a linearly interpolated sample, so that prof/sqrt(cnt) has unit noise.
+
+   Precision: the per-sample arithmetic is single precision (FP64 runs at 1/32 of FP32 on the RTX 6000 / Turing and
+   the double-precision version was FP64-bound). The sub-integration is processed in chunks of FOLD_CHUNK samples;
+   at the start of every chunk the orbital angle n*t - phi (reduced to [0, 2pi)) and the pulse phase f0*t (reduced
+   to [0, 1)) are computed once in double, and every sample adds its offset from the chunk start in float. The index
+   stays an integer, only the Roemer delay in samples is a float. Errors: orbital angle <~5e-7 rad, delay
+   <~3 us for a1 <= 5 lt-s (sinf ~1 ulp), pulse phase <~5e-4 turn at 1000 Hz (FOLD_CHUNK * tsamp ~ 4 s per chunk);
+   all small against one sample (0.12 turn at 1000 Hz for tsamp = 120 us). The CPU path (--cpu) stays in double
+   and serves as the reference. */
+#define FOLD_CHUNK 32768
 __global__ void fold_template_kernel(const float* __restrict__ input_d, float* __restrict__ prof_d, float* __restrict__ cnt_d,
                                      double n, double a1, double phi, double f0, double tsamp, double inverse_tsamp,
                                      unsigned long size, int nsub, int nbins, int linear)
 {
     extern __shared__ float sh[];
+    __shared__ float ref[2];          // orbital angle and pulse phase at the chunk start
     float* hist = sh;                 // nbins
     float* cnt  = sh + nbins;         // nbins
     for (int b = threadIdx.x; b < nbins; b += blockDim.x) { hist[b] = 0.0f; cnt[b] = 0.0f; }
@@ -203,28 +214,45 @@ __global__ void fold_template_kernel(const float* __restrict__ input_d, float* _
     int isub = blockIdx.x;
     unsigned long start = ((unsigned long) isub * size) / nsub;
     unsigned long end   = ((unsigned long) (isub + 1) * size) / nsub;
-    for (unsigned long idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
-        double t = idx * tsamp;
-        double pos = idx + a1 * sin(n * t - phi) * inverse_tsamp;      // getCircular_orbit_index, fractional
-        float v, var; bool ok;
-        if (linear) {
-            double fl = floor(pos); double w = pos - fl; long long i0 = (long long) fl;
-            if (i0 >= 0 && i0 + 1 <= (long long) size - 1) { v = (float) ((1.0 - w) * input_d[i0] + w * input_d[i0 + 1]); var = (float) ((1.0 - w) * (1.0 - w) + w * w); ok = true; }
-            else if (i0 >= 0 && i0 <= (long long) size - 1) { v = input_d[i0]; var = 1.0f; ok = true; }
-            else { v = 0.0f; var = 0.0f; ok = false; }
-        } else {
-            long long i0 = (long long) nearbyint(pos);
-            ok = (i0 >= 0 && i0 <= (long long) size - 1);
-            v = ok ? input_d[i0] : 0.0f; var = 1.0f;
+    const double two_pi = 6.283185307179586476925287;
+    const float dth = (float) (n * tsamp);              // orbital angle per sample (rad)
+    const float dph = (float) (f0 * tsamp);             // pulse phase per sample (turns)
+    const float a1s = (float) (a1 * inverse_tsamp);     // projected semi-major axis in samples
+    const long long last = (long long) size - 1;
+    const float fnbins = (float) nbins;
+    for (unsigned long c0 = start; c0 < end; c0 += FOLD_CHUNK) {
+        unsigned long c1 = c0 + FOLD_CHUNK < end ? c0 + FOLD_CHUNK : end;
+        if (threadIdx.x == 0) {
+            double t0 = c0 * tsamp;
+            double th = n * t0 - phi; th -= two_pi * floor(th / two_pi);
+            double ph = f0 * t0;      ph -= floor(ph);
+            ref[0] = (float) th; ref[1] = (float) ph;
         }
-        if (!ok) continue;
-        double ph = f0 * t;
-        ph -= floor(ph);
-        int b = (int) (ph * nbins); if (b >= nbins) b = nbins - 1;
-        atomicAdd(&hist[b], v);
-        atomicAdd(&cnt[b], var);
+        __syncthreads();
+        const float th0 = ref[0], ph0 = ref[1];
+        for (unsigned long idx = c0 + threadIdx.x; idx < c1; idx += blockDim.x) {
+            const float j = (float) (idx - c0);                     // exact: < FOLD_CHUNK
+            const float rs = a1s * sinf(fmaf(dth, j, th0));         // Roemer delay in samples (getCircular_orbit_index)
+            float v, var; bool ok;
+            if (linear) {
+                float fl = floorf(rs); float w = rs - fl; long long i0 = (long long) idx + (long long) fl;
+                if (i0 >= 0 && i0 + 1 <= last) { v = (1.0f - w) * input_d[i0] + w * input_d[i0 + 1]; var = (1.0f - w) * (1.0f - w) + w * w; ok = true; }
+                else if (i0 >= 0 && i0 <= last) { v = input_d[i0]; var = 1.0f; ok = true; }
+                else { v = 0.0f; var = 0.0f; ok = false; }
+            } else {
+                long long i0 = (long long) idx + (long long) lrintf(rs);
+                ok = (i0 >= 0 && i0 <= last);
+                v = ok ? input_d[i0] : 0.0f; var = 1.0f;
+            }
+            if (!ok) continue;
+            float ph = fmaf(dph, j, ph0);
+            ph -= floorf(ph);
+            int b = (int) (ph * fnbins); if (b >= nbins) b = nbins - 1;
+            atomicAdd(&hist[b], v);
+            atomicAdd(&cnt[b], var);
+        }
+        __syncthreads();              // ref[] is rewritten for the next chunk
     }
-    __syncthreads();
     for (int b = threadIdx.x; b < nbins; b += blockDim.x) {
         prof_d[(size_t) isub * nbins + b] = hist[b];
         cnt_d[(size_t) isub * nbins + b]  = cnt[b];
