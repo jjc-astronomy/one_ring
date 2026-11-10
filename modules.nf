@@ -380,7 +380,10 @@ process pulsarx {
 
     script:
     def custom_nbin_arg = program_args.custom_nbin_plan != null ? "--custom_nbin_plan=\"${program_args.custom_nbin_plan}\"" : ""
-    def extra_args = program_args.extra_args != null ? "--extra_args=\"${program_args.extra_args}\"" : ""
+    // psrfold_fil2 search switches from params.folding (nextflow.config), named as the psrfold_fil2 options
+    def psrfold_flags = ['nof0search', 'nof1search', 'nodmsearch'].findAll { params.folding[it] }.collect { "--${it}" }
+    def pulsarx_extra = ([program_args.extra_args] + psrfold_flags).findAll { it != null && it.toString().trim() && it.toString() != 'null' }.join(' ')
+    def extra_args = pulsarx_extra ? "--extra_args=\"${pulsarx_extra}\"" : ""
     def avoid_folding_file = program_args.avoid_folding_file != "null" ? "--avoid_folding_file=\"${program_args.avoid_folding_file}\"" : ""
 
     """
