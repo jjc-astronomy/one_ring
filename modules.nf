@@ -705,6 +705,7 @@ process hierarchical_fold_search {
         --lattice ${hs.lattice ?: 'linear'} --sample_n ${hs.sample_n ?: 2000} \\
         -o ${output_dp} --history foldsearch_history.csv ${optional_args}
 
-    output_dp_id=\$(uuidgen)
+    # the hierarchical_fold image has no uuidgen (uuid-runtime); use python
+    output_dp_id=\$(python -c 'import uuid; print(uuid.uuid4())')
     """
 }
