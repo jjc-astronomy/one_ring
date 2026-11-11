@@ -115,8 +115,7 @@ template bank search configured above (typically a coarse bank split into chunks
 entry per chunk). With `hierarchical_search.enable = 1` the pipeline then, for every filterbank
 and search segment:
 
-1. groups the stage-1 `output.xml` files (all template bank chunks and, if `merge_dm_ranges = 1`,
-   all incoherent DM ranges of the filterbank),
+1. groups the stage-1 `output.xml` files of every stage-1 DM range (all template bank chunks),
 2. maps every candidate to Legendre-coefficient space and keeps only the S/N peaks
    (`scripts/hierarchical_search.py cluster`); a peak that rises less than `min_prominence`
    (in S/N) above the saddle towards a brighter touching cluster is absorbed into that cluster,
@@ -188,7 +187,8 @@ and search segment:
    range lies below the first zero of j2, so the map is one-to-one. On the 12 stage-1 peaks of
    J1807-2459A in one DM trial this takes 102 s (against 55 s for one round). There is one job per dumped
    DM trial: it takes every peak whose nearest dumped DM is that trial, so that all branches of a
-   signal at one DM drift and merge within the job; the jobs run on GPU nodes in the peasoup container. The DM range of a group is the union of the stage-1 ranges,
+   signal at one DM drift and merge within the job; the jobs run on GPU nodes in the peasoup container. Every stage-1 DM
+   range is its own group, and its jobs pass that DM range (`<dm_start>_<dm_end>`) on to the merge and the folding,
 5. merges the stage-2 chunk results into a single XML file, clustered again (in spin frequency and
    Legendre-coefficient space) if `cluster_stage2 = 1`, which is then folded with PulsarX. The S/N thresholds and candidate limit
    for this fold come from `hierarchical_search.folding_configuration` (same syntax as
@@ -199,7 +199,6 @@ and search segment:
 hierarchical_search {
     enable = 1
     stage1_cfg_regex = "30m/ck02/tb_ck.*"   // which stage-1 runs take part (null = all)
-    merge_dm_ranges = 1
     nominal_mismatch = null               // null: MISMATCH of the stage-1 template bank header
     tobs = null                 // observation length (s) for a_n and the metric; null: the segment length
     period_min = null                     // null: SPIN PERIOD of the bank header
@@ -246,7 +245,7 @@ and `filter_publish_dir`, by default `11_`, `12_` and `13_HIERARCHICAL_SEARCH`),
 11_HIERARCHICAL_SEARCH/<target>/<utc>/<filstr>/<pipeline_name>/
     <dm_start>_<dm_end>/<cfg_name>/output.xml                 # stage-1 peasoup results (one per DM range and chunk)
     <dm_start>_<dm_end>/<stage-1 cfg dir>/timeseries/*.dat,*.inf   # dedispersed time series per DM trial
-    <dm_start>_<dm_end>/<stage-1 cfg dir>/<cfg_suffix>/       # stage 2, DM range = union of the stage-1 ranges
+    <dm_start>_<dm_end>/<stage-1 cfg dir>/<cfg_suffix>/       # stage 2/3, per stage-1 DM range
         clustered_peaks.csv, hierarchical_summary.json        # clustering summary
         fold_ck000/output.xml, ...                            # stage-2 fold-search results per job
         merged/output.xml                                     # merged (and clustered) result that is folded
@@ -254,7 +253,9 @@ and `filter_publish_dir`, by default `11_`, `12_` and `13_HIERARCHICAL_SEARCH`),
 13_HIERARCHICAL_SEARCH/.../<stage-1 cfg dir>/<cfg_suffix>/merged/<fold group>/   # PICS and post-folding heuristics
 ```
 
-The DM range directory is the union of the stage-1 ranges when `merge_dm_ranges = 1`.
+The stage-2/3 DM range directory is the stage-1 DM range. Only the merge before PulsarX can combine ranges: with
+`merge_dm_trials = 1` and `merge_dm_ranges = 1` the merged result and the PulsarX folds carry the union of the
+stage-1 DM ranges of the filterbank.
 
 The clustering and merging steps run inside the PulsarX container (they need numpy and scipy only).
 Set `search_only = true` to stop after stage 2 without folding, and

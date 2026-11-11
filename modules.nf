@@ -593,7 +593,8 @@ process post_folding_heuristics{
 /*
  * Hierarchical (two-stage) template bank search, stage 2 and 3: hierarchical_fold_search.
  *
- * One job per dumped DM trial of a filterbank/segment group. The job first clusters ALL stage-1
+ * One job per dumped DM trial of a group (filterbank + segment + stage-1 DM range; the job carries the
+ * group's DM range on to the merge and PulsarX). The job first clusters ALL stage-1
  * candidates of the group in Legendre-coefficient space into S/N peaks (hierarchical_search.py cluster,
  * clustered_peaks.csv; every job of the group repeats the same deterministic clustering, about a
  * second), then fold-searches the peaks whose nearest DM trial is its own (--dm_select): fine lattice

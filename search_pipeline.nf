@@ -107,7 +107,7 @@ workflow {
      */
     def segKey = { a -> [a.fft_size, a.start_sample, a.nsamples].collect { it.toString() }.join('|') }
     def dump_program_ids = [] as Set
-    def dump_counts = [:]      // coherent_dm|segment -> number of dumping jobs (= DM ranges) per filterbank
+    def dump_counts = [:]      // coherent_dm|segment -> number of dumping jobs (= stage-1 DM ranges) per filterbank
     if (hierarchical_enabled) {
         def dump_regex = params.hierarchical_search.stage1_cfg_regex ?: '.*'
         peasoup_prog.findAll { p -> p.arguments.cfg_name.toString() ==~ dump_regex }
@@ -163,16 +163,17 @@ workflow {
     /*
      * Hierarchical (two-stage) template bank search (params.hierarchical_search.enable == 1).
      *
-     * 1. The stage-1 peasoup results of one filterbank + segment (all template bank chunks and, if
-     *    merge_dm_ranges == 1, all incoherent DM ranges) are grouped together.
-     * 2. hierarchical_fold_search (stage 2 and 3), one job per dumped DM trial: it starts by clustering all
-     *    stage-1 candidates of the group in Legendre-coefficient space into S/N peaks (clustered_peaks.csv),
-     *    then the dedispersed time series dumped by stage 1 are resampled and folded on the GPU for every
-     *    fine-lattice template of every peak whose nearest DM trial is the job's. The DM range of a group is
-     *    the union of the stage-1 DM ranges.
+     * 1. The stage-1 peasoup results of one filterbank + segment + stage-1 DM range (all template bank
+     *    chunks) are grouped together; every stage-1 DM range is its own stage-2 group.
+     * 2. hierarchical_fold_search (stage 2 and 3), one job per dumped DM trial of the range: it starts by
+     *    clustering all stage-1 candidates of the group in Legendre-coefficient space into S/N peaks
+     *    (clustered_peaks.csv), then the dedispersed time series dumped by stage 1 are resampled and folded on
+     *    the GPU for every fine-lattice template of every peak whose nearest DM trial is the job's.
      * 3. Candidates are clustered in every round of the stage-2 search. With merge_dm_trials == 1 the stage-2
-     *    XML files of all DM trials of a group are clustered across DM (hierarchical_merge_dm) and the merged
-     *    list is folded by one PulsarX job; otherwise the stage-2 XML file of every DM trial is folded directly.
+     *    XML files of all DM trials are clustered across DM (hierarchical_merge_dm) and the merged list is
+     *    folded by one PulsarX job: per stage-1 DM range, or, with merge_dm_ranges == 1, per filterbank +
+     *    segment over all its DM ranges (the publish directories then carry the union of the DM ranges).
+     *    With merge_dm_trials == 0 the stage-2 XML file of every DM trial is folded directly.
      *
      * Everything downstream (candy_picker, pulsarx, pics, ...) consumes 'search_output'. Every record of
      * 'search_output' carries, as its last element, the map of stage directories its products are published
@@ -193,8 +194,8 @@ workflow {
                 sameNumber(p.arguments.dm_end, dm_end)
             }
         }
-        // Number of stage-1 peasoup runs that end up in the same group (same filterbank, same segment),
-        // so that a group can be released as soon as its own members have finished.
+        // Number of stage-1 peasoup runs that end up in the same group (same filterbank, segment and DM range,
+        // i.e. the template bank chunks), so that a group can be released as soon as its own members have finished.
         def stage1GroupSize = { prog ->
             def a = prog.arguments
             peasoup_prog.count { p ->
@@ -203,9 +204,10 @@ workflow {
                 p.arguments.fft_size.toString() == a.fft_size.toString() &&
                 p.arguments.start_sample.toString() == a.start_sample.toString() &&
                 p.arguments.nsamples.toString() == a.nsamples.toString() &&
-                (hs.merge_dm_ranges == 1 || (sameNumber(p.arguments.dm_start, a.dm_start) && sameNumber(p.arguments.dm_end, a.dm_end)))
+                sameNumber(p.arguments.dm_start, a.dm_start) && sameNumber(p.arguments.dm_end, a.dm_end)
             }
         }
+        def numKey = { v -> new BigDecimal(v.toString()).stripTrailingZeros().toPlainString() }
 
         hierarchical_groups = peasoup_output
             .filter { rec -> rec[6].toString() ==~ stage1_cfg_regex }
@@ -215,8 +217,8 @@ workflow {
                     throw new IllegalStateException("hierarchical_search: no peasoup program found for cfg_name=${cfg_name} coherent_dm=${coherent_dm} dm_start=${dm_start} dm_end=${dm_end}")
                 }
                 def pepoch_key = new BigDecimal(segment_pepoch.toString()).stripTrailingZeros().toPlainString()
-                def key = [target_name, utc_start, beam_id, beam_name, filstr, coherent_dm, pepoch_key]
-                if (hs.merge_dm_ranges != 1) key += [dm_start, dm_end]
+                // one stage-2 group per stage-1 DM range
+                def key = [target_name, utc_start, beam_id, beam_name, filstr, coherent_dm, pepoch_key, dm_start, dm_end]
                 def group_size = stage1GroupSize(stage1_prog)
                 def group_key = group_size > 0 ? groupKey(key.join('|'), group_size) : key.join('|')
                 tuple(group_key, output_dp, output_dp_id, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end, stage1_prog)
@@ -245,7 +247,7 @@ workflow {
                 def dm_start_list = reord(dm_start_list_in)
                 def dm_end_list = reord(dm_end_list_in)
                 def stage1_prog_list = reord(stage1_prog_list_in)
-                // Stage-2 DM range: union of the stage-1 DM ranges (original string formatting is kept)
+                // Stage-2 DM range = the group's stage-1 DM range (all members share it; original formatting kept)
                 def i_min = (0..<dm_start_list.size()).min { new BigDecimal(dm_start_list[it].toString()) }
                 def i_max = (0..<dm_end_list.size()).max { new BigDecimal(dm_end_list[it].toString()) }
                 // Directory part of the stage-1 cfg names, e.g. "30m/ck02" for "30m/ck02/tb_ck000"
@@ -280,22 +282,20 @@ workflow {
          * One job per dumped time series (DM trial) of the group.
          */
 
-        // time series of one filterbank + segment: all its DM ranges (one dumping job each)
+        // time series of one filterbank + segment + stage-1 DM range (one dumping job per range)
         timeseries_groups = peasoup.out.timeseries
             .map { filstr, utc_start, beam_id, args, files ->
-                def key = [utc_start, beam_id, filstr, segKey(args)].join('|')
-                def n = dump_counts["${args.coherent_dm}|${segKey(args)}".toString()] ?: 1
-                tuple(groupKey(key, n), files instanceof List ? files : [files])
+                def key = [utc_start, beam_id, filstr, segKey(args), numKey(args.dm_start), numKey(args.dm_end)].join('|')
+                tuple(key, (files instanceof List ? files : [files]).sort { it.toString() })   // fixed order for -resume
             }
-            .groupTuple(by: 0)
-            .map { key, lists -> tuple(key.toString(), lists.flatten().sort { it.toString() }) }   // fixed order for -resume
 
         // one stage-2 job per dumped time series (DM trial): the job takes every peak whose nearest DM trial is
         // that series, so that all branches of a signal at one DM drift and merge within the job
         // (every job of a group gets all stage-1 XML files of the group and clusters them itself)
         fold_jobs = hierarchical_groups
             .map { g ->
-                def key = [g.meta.utc_start, g.meta.beam_id, g.meta.filstr, segKey(g.meta.stage1_program_args)].join('|')
+                def key = [g.meta.utc_start, g.meta.beam_id, g.meta.filstr, segKey(g.meta.stage1_program_args),
+                           numKey(g.meta.dm_start), numKey(g.meta.dm_end)].join('|')
                 tuple(key, g.meta, g.stage1_xmls, g.stage1_dp_ids)
             }
             .combine(timeseries_groups, by: 0)
@@ -332,38 +332,61 @@ workflow {
 
         if (hs.merge_dm_trials == 1) {
             /*
-             * One PulsarX job per group instead of one per DM trial: the stage-2 XML files of all DM trials of a
-             * group are collected and clustered across DM (hierarchical_merge_dm), and the merged list is folded.
-             * A group is released as soon as all its DM-trial jobs have finished (group size = number of jobs).
+             * One PulsarX job per group instead of one per DM trial: the stage-2 XML files of all DM trials are
+             * collected and clustered across DM (hierarchical_merge_dm), and the merged list is folded.
+             * 1. per stage-1 DM range: released as soon as all its DM-trial jobs have finished (size = jobs);
+             * 2. with merge_dm_ranges == 1 the DM ranges of a filterbank + segment are collected as well (size =
+             *    number of its stage-1 DM ranges) and merged together; the merged group carries the union of the
+             *    DM ranges (publish directories <dm_start>_<dm_end>).
              */
             def mergeKey = { target_name, utc_start, beam_id, filstr, segment_pepoch, coherent_dm, dm_start, dm_end, cfg_hier ->
-                [target_name, utc_start, beam_id, filstr,
-                 new BigDecimal(segment_pepoch.toString()).stripTrailingZeros().toPlainString(),
+                [target_name, utc_start, beam_id, filstr, numKey(segment_pepoch),
                  coherent_dm, dm_start, dm_end, cfg_hier].collect { it.toString() }.join('|')
             }
             def cfgHierOf = { cfg_name -> cfg_name.toString().replaceFirst(/\/fold_dm[^\/]*$/, '') }
+            // per DM range: number of DM-trial jobs, and number of stage-1 DM ranges of its filterbank + segment
             dm_job_counts = fold_jobs
                 .map { key, meta, stage1_xmls, dm, dm_list, njobs, stage1_dp_ids, ts_files ->
+                    def a = meta.stage1_program_args
                     tuple(mergeKey(meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, meta.segment_pepoch,
-                                   meta.coherent_dm, meta.dm_start, meta.dm_end, meta.cfg_hier), njobs)
+                                   meta.coherent_dm, meta.dm_start, meta.dm_end, meta.cfg_hier), njobs,
+                          dump_counts["${a.coherent_dm}|${segKey(a)}".toString()] ?: 1)
                 }
                 .unique()
-            merge_input = stage2_output
+            merged_per_range = stage2_output
                 .map { rec ->
                     def (output_dp, output_dp_id, publish_dir, segment_pepoch, beam_name, coherent_dm, cfg_name, utc_start, target_name, beam_id, filstr, dm_start, dm_end) = rec
                     tuple(mergeKey(target_name, utc_start, beam_id, filstr, segment_pepoch, coherent_dm, dm_start, dm_end, cfgHierOf(cfg_name)), rec)
                 }
                 .combine(dm_job_counts, by: 0)
-                .map { key, rec, njobs -> tuple(groupKey(key, njobs), rec) }
+                .map { key, rec, njobs, nranges -> tuple(groupKey(key, njobs), rec, nranges) }
                 .groupTuple(by: 0)
-                .map { key, recs ->
+                .map { key, recs, nranges ->
                     // fixed order (by the cfg name, i.e. fold_dm<zero-padded DM>) for reproducible staging and -resume
                     def sorted = recs.sort { it[6].toString() }
                     def r = sorted[0]
                     def meta = [segment_pepoch: r[3], beam_name: r[4], coherent_dm: r[5], cfg_name: cfgHierOf(r[6]),
                                 utc_start: r[7], target_name: r[8], beam_id: r[9], filstr: r[10], dm_start: r[11], dm_end: r[12]]
-                    tuple(meta, sorted.collect { it[0] })
+                    tuple(meta, sorted.collect { it[0] }, nranges[0])
                 }
+            if (hs.merge_dm_ranges == 1) {
+                merge_input = merged_per_range
+                    .map { meta, xmls, nranges ->
+                        def fileKey = [meta.target_name, meta.utc_start, meta.beam_id, meta.filstr, numKey(meta.segment_pepoch),
+                                       meta.coherent_dm, meta.cfg_name].collect { it.toString() }.join('|')
+                        tuple(groupKey(fileKey, nranges), meta, xmls)
+                    }
+                    .groupTuple(by: 0)
+                    .map { key, metas, xml_lists ->
+                        // DM ranges in DM order; the merged group spans the union of the ranges
+                        def ord = (0..<metas.size()).toList().sort { new BigDecimal(metas[it].dm_start.toString()) }
+                        def i_max = (0..<metas.size()).max { new BigDecimal(metas[it].dm_end.toString()) }
+                        def meta = metas[ord[0]] + [dm_end: metas[i_max].dm_end]
+                        tuple(meta, ord.collectMany { xml_lists[it] })
+                    }
+            } else {
+                merge_input = merged_per_range.map { meta, xmls, nranges -> tuple(meta, xmls) }
+            }
             stage2_output = hierarchical_merge_dm(merge_input).xml
         }
         hierarchical_output = stage2_output.map { rec -> rec + [stage2_dirs] }
