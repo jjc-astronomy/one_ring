@@ -1447,40 +1447,12 @@ def cmd_foldsearch(args):
     if args.tobs is not None:
         tobs = args.tobs
     pepoch = ref_info['segment_pepoch']
+    # search ball of every branch: constant radius (a branch moves by re-centring) and lattice step
     halfrange = args.search_halfrange_fac * np.sqrt(args.nominal_mismatch)
-    halfrange0 = halfrange
     stepsize = args.search_stepsize_fac * np.sqrt(args.nominal_mismatch)
     freq_max = 1. / args.period_min
     widths = box_widths(args.nbins, args.ducy_max)
     dfreqs = np.arange(-args.f0_halfrange_bins, args.f0_halfrange_bins + 1e-9, args.f0_step_bins) / tobs
-
-    # Stage-1 template bank as a global sample of the orbit manifold: its templates inside the (grown) ball of a
-    # drifting branch are starting points on the other sheets (see sample_lattice). Coefficients at a reference
-    # frequency; they scale linearly with frequency.
-    bank_tree, bank_tmpl, f_bank = None, None, freq_max
-    if args.bank_seeds and HAVE_SCIPY:
-        bank_path = getattr(args, 'template_bank', None) or bank_header_from_xml(args.reference_xml)[0]
-        if bank_path and os.path.exists(bank_path):
-            import glob as _glob, re as _re
-            files = sorted(_glob.glob(_re.sub(r'_ck\d+', '_ck*', bank_path))) or [bank_path]
-            bank_tmpl = np.concatenate([np.loadtxt(f, comments='#', usecols=(0, 1, 2), ndmin=2) for f in files])
-            an_bank = orbital_an(bank_tmpl, f_bank, tobs, args.order_highest).astype(np.float32)
-            bank_tree = scipy.spatial.cKDTree(an_bank)
-            logging.info("bank seeds: %d templates from %d file(s), coefficients at %.0f Hz", len(bank_tmpl), len(files), f_bank)
-        else:
-            logging.warning("bank seeds requested but no template bank file found (%s)", bank_path)
-
-    def bank_seeds_in_ball(centre, f_center, radius):
-        """Bank templates whose coefficients (at f_center) lie within 'radius' of the centre's, excluding the centre itself."""
-        if bank_tree is None:
-            return None
-        q = orbital_an(centre[None, :], f_bank, tobs, args.order_highest)[0].astype(np.float32)
-        idx = bank_tree.query_ball_point(q, r=radius * f_bank / f_center)
-        if not idx:
-            return None
-        seeds = bank_tmpl[idx]
-        far = np.linalg.norm(np.log(seeds[:, :2]) - np.log(centre[None, :2]), axis=1) > 1e-6
-        return seeds[far] if far.any() else None
 
     # Per peak: fold frequency, orbital template, DM trials used
     peaks0 = list(peaks)
@@ -1505,19 +1477,14 @@ def cmd_foldsearch(args):
                 lattices[iu], _ = adaptive_lattice(centers, freq_max, tobs, args.order_highest, halfrange, stepsize, refine=args.lattice_refine)
             elif args.lattice == 'sample':
                 f_center = max(float(peak_f0[ip]) for ip in range(len(peaks)) if tmpl_of_peak[ip] == iu)
-                # the number of samples follows the volume of the ball (grown balls of drifting branches)
-                nsamp = int(round(args.sample_n * (halfrange / halfrange0) ** 3))
                 pbb = (bank_hdr['porb_min_h'] * 3600., bank_hdr['porb_max_h'] * 3600.) if 'porb_min_h' in bank_hdr else None
                 if args.sample_nlead == 3:
                     # exhaustive inversion: every sheet of the orbit manifold inside the ball, no starting point needed
                     lattices[iu], _ = all_roots_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                                        nsamples=nsamp, pb_bounds=pbb)
+                                                        nsamples=args.sample_n, pb_bounds=pbb)
                 else:
-                    seeds = bank_seeds_in_ball(centers[0], f_center, halfrange) if (args.bank_seeds and halfrange > halfrange0 * 1.001) else None
                     lattices[iu], _ = sample_lattice(centers, f_center, tobs, args.order_highest, halfrange, stepsize,
-                                                     nlead=args.sample_nlead, nsamples=nsamp, starts=seeds, pb_bounds=pbb)
-                    if seeds is not None:
-                        lattices[iu] = np.concatenate([lattices[iu], seeds])
+                                                     nlead=args.sample_nlead, nsamples=args.sample_n, pb_bounds=pbb)
             else:
                 lattices[iu], _ = eigen_lattice(centers, circular_metric(centers, freq_max, tobs, args.order_highest), halfrange, stepsize)
             if not args.no_bank_clip and bank_hdr:
@@ -1580,7 +1547,7 @@ def cmd_foldsearch(args):
         templates = np.concatenate([lattice_of(tmpl_of_peak[ip]), peak_tmpl[ip][None, :]])
         f0 = peak_f0[ip]
         # fold every template at the frequency where the stage-1 FFT would have found it (exact to the
-        # interbinning quantisation whatever the distance from the centre, so the scan does not grow with the ball)
+        # interbinning quantisation whatever the distance from the centre, so the scan is independent of the ball radius)
         f0_fold = f0 - fft_frequency_offsets(templates, f0, peak_tmpl[ip], tobs)
         f0_half = args.f0_halfrange_bins
         nsub = args.nsub if args.nsub > 0 else int(2 ** np.ceil(np.log2(max(32, args.nbins * f0_half / args.max_phase_drift_bins))))
@@ -1697,7 +1664,6 @@ def cmd_foldsearch(args):
         centre_key = lambda tm, f: (round(float(tm[0]), 12), round(float(tm[1]), 9), round(float(tm[2]), 9), round(float(f), 7))
         visited = {ip: {centre_key(peak_tmpl[ip], peak_f0[ip])} for ip in range(n0)}   # centres already searched per branch
         for rnd in range(1, args.max_rounds + 1):
-            halfrange = halfrange0                    # constant ball: a branch moves by re-centring, not by growing
             lattices.clear(); work.clear()
             best_of_peak[:] = [None] * len(peaks); nsub_of_peak[:] = [0] * len(peaks)
             for ip in range(len(peaks)):
@@ -1723,17 +1689,6 @@ def cmd_foldsearch(args):
             stationary = (d_frac <= 0.) & (f_frac < 1e-6)
             cur = [(origin[ip], peak_f0[ip], best_of_peak[ip], rounds[ip] + 1, d_frac[ip], f_frac[ip]) for ip in range(len(peaks))]
             allb = finished + cur
-            if args.drift_snr_ratio > 0:
-                # A branch at a local maximum whose frequency (within the bank's Doppler range) and DM coincide with a
-                # much brighter branch is an alias of that signal: keep it drifting (with a growing ball) so that it
-                # can reach the brighter solution and be merged by the clustering. The merge itself is decided by the
-                # clustering in model space, this only decides where to keep searching.
-                fa = np.array([b[1] + b[2]['dfreq'] for b in allb]); sa = np.array([b[2]['snr'] for b in allb]); dma = np.array([b[2]['dm'] for b in allb])
-                for ip in range(len(peaks)):
-                    k = len(finished) + ip
-                    near = (np.abs(fa / fa[k] - 1.) < args.drift_fdiff) & (np.abs(dma - dma[k]) <= args.drift_dm_tol)
-                    if np.any(near & (sa >= args.drift_snr_ratio * sa[k])) and not stationary[ip]:
-                        drifting[ip] = True
             for ip in range(len(peaks)):
                 b = best_of_peak[ip]; tm = b['template']
                 logging.debug("round %d branch %d (peak %d): f0 %.6f Pb %.4f h a1 %.5f phi %.3f S/N %.1f DM %.3f position %.2f / %.2f%s%s",
@@ -1975,14 +1930,6 @@ def main():
     pf.add_argument('--distance_tol', type=float, default=5.0, help='clustering between rounds: radius in units of sqrt(nominal_mismatch)')
     pf.add_argument('--min_prominence', type=float, default=1.0, help='clustering between rounds: prominence rule (see cluster)')
     pf.add_argument('--max_rounds', type=int, default=20, help='search rounds: a branch whose result lies near the edge of its region is re-centred and searched again (1 = single search)')
-    pf.add_argument('--bank_seeds', type=int, default=0,
-                    help='1: in grown balls, use the stage-1 bank templates inside the ball as extra starting points of the '
-                         'sampled lattice (reaches the sheets of the orbit manifold that the bank samples; costly)')
-    pf.add_argument('--drift_snr_ratio', type=float, default=1.5,
-                    help='keep a branch drifting when a candidate at the same frequency (within drift_fdiff) and DM is at least '
-                         'this many times brighter (0 = off)')
-    pf.add_argument('--drift_fdiff', type=float, default=3e-3, help="fractional frequency window of the drift trigger (the bank's maximal Doppler shift)")
-    pf.add_argument('--drift_dm_tol', type=float, default=1.5, help='DM tolerance of the drift trigger (pc/cc)')
     pf.add_argument('--edge_frac', type=float, default=0.9, help='a result farther than this fraction of the half range (or of the frequency scan range) from the centre continues to the next round; closer results halt and go to the refinement')
     pf.add_argument('--nominal_mismatch', type=float, default=None)
     pf.add_argument('--template_bank', default=None)

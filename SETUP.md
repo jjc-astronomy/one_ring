@@ -147,7 +147,7 @@ and search segment:
    residual exceeds a radian, up to 20 bins for the aliases of NGC 6544A, whereas the FFT peak
    reproduces the stage-1 frequency to the interbinning quantisation (< 0.8 bins on all 12 peaks)
    whatever the distance, so the grid of frequency offsets (`fold.f0_halfrange_bins`, 1.5 bins,
-   `fold.f0_step_bins`) only covers that quantisation and does not grow with the search ball.
+   `fold.f0_step_bins`) only covers that quantisation and is independent of the radius of the search ball.
    The grid is searched on the device too, by whole-bin shifts of the
    sub-integrations, and scored with pyloki's boxcar matched filter, so that only the best
    (S/N, width, offset) per template is returned to the host. The best (orbit, frequency) of every peak
@@ -174,10 +174,7 @@ and search segment:
    `min_prominence`), so the branches of one bright pulsar that converge to the same orbit merge.
    The XML records `fold_rounds` per candidate. The search ball keeps its size: a branch moves by
    re-centring only. A branch whose best template is its own centre at zero frequency offset sits
-   on a local maximum, is not folded again and waits in the finished list for the refinement; a
-   branch that stops at a local maximum
-   keeps drifting while a candidate at the same frequency and DM is much brighter
-   (`fold.drift_snr_ratio`, `drift_fdiff`, `drift_dm_tol`): such a branch is an alias of that signal.
+   on a local maximum, is not folded again and waits in the finished list for the refinement.
    The lattice of the `sample` type is built by inverting the three leading coefficients of every
    sampled target in closed form: the ratio a4/a2 = -(3/sqrt5) j4(s)/j2(s) (s = pi T / Pb) depends on
    the orbital period alone and is monotone between consecutive zeros of j2 (s = 5.76, 9.10, ...),
