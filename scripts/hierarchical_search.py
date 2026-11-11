@@ -278,7 +278,8 @@ def circular_metric(template, freq_max, tobs, order_highest):
 # Clustering
 ###############################################################################
 
-def find_snr_peaks(an, snr, radius, min_prominence=0.0, workers=1):
+def find_snr_peaks(an, snr, radius, min_prominence=0.0, workers=1, link_index=None, max_link=None,
+                   return_labels=False):
     """
     Cluster candidates in a_n space and return the S/N peaks.
 
@@ -289,13 +290,23 @@ def find_snr_peaks(an, snr, radius, min_prominence=0.0, workers=1):
     into the cluster with the brightest peak. With min_prominence = 0 nothing is absorbed and the
     peaks are exactly the local S/N maxima (the original rule). Ties in S/N go to the lower index.
 
+    link_index / max_link: an additional integer coordinate (e.g. the DM trial index); two candidates
+    are neighbours only if their link_index values differ by at most max_link. Clusters then grow
+    along chains of neighbouring trials (a pulsar seen over a wide DM range is one cluster) and the
+    watershed finds the peaks of the S/N curve along that coordinate.
+
     Returns (idx_peak, prominence, nmembers): the candidate indices of the surviving peaks (in
     decreasing S/N), the prominence of each peak (inf if it never touches a brighter cluster) and
-    the number of candidates in its cluster.
+    the number of candidates in its cluster; with return_labels also the cluster label (root
+    candidate index) of every candidate.
     """
     n = len(snr)
     tree = scipy.spatial.KDTree(an, leafsize=30)
     neighbours = tree.query_ball_point(an, r=radius, p=2, eps=0, workers=workers)
+    if link_index is not None and max_link is not None:
+        link_index = np.asarray(link_index)
+        neighbours = [np.asarray(nb)[np.abs(link_index[np.asarray(nb, dtype=np.int64)] - link_index[i]) <= max_link]
+                      for i, nb in enumerate(neighbours)]
 
     order = np.argsort(-snr, kind='stable')
     rank = np.empty(n, dtype=np.int64)
@@ -315,7 +326,7 @@ def find_snr_peaks(an, snr, radius, min_prominence=0.0, workers=1):
         return roots
 
     for i in order:
-        nbrs = np.asarray(neighbours[i])
+        nbrs = np.asarray(neighbours[i], dtype=np.int64)
         brighter = nbrs[rank[nbrs] < rank[i]]
         if brighter.size == 0:
             is_peak[i] = True
@@ -335,15 +346,46 @@ def find_snr_peaks(an, snr, radius, min_prominence=0.0, workers=1):
     idx_peak = order[is_peak[order]]
     roots = find_roots(np.arange(n))
     nmembers = np.bincount(roots, minlength=n)[idx_peak]
+    if return_labels:
+        return idx_peak, prominence[idx_peak], nmembers, roots
     return idx_peak, prominence[idx_peak], nmembers
 
 
 def cluster_candidates(arrays, tobs, order_highest, f0tol_fac, nominal_mismatch, distance_tol,
-                       min_prominence=0.0, workers=1):
+                       min_prominence=0.0, workers=1, dm_link=None, return_labels=False):
+    """
+    Cluster candidates in a_n space (spin frequency and orbit). With dm_link the candidates are also linked
+    along DM: two candidates with matching spin frequency and orbit are neighbours if their DM trials (the
+    distinct DM values of the input, sorted) are at most dm_link trials apart, so the S/N peaks are the peaks
+    of each signal's S/N(DM) curve (see find_snr_peaks).
+    """
     spin_freq = 1. / arrays['period']
     an = keplerian_to_an(arrays['template'], tobs, spin_freq, order_highest, f0tol_fac)
     radius = distance_tol * np.sqrt(nominal_mismatch)
-    return find_snr_peaks(an, arrays['snr'], radius, min_prominence=min_prominence, workers=workers)
+    link_index = None
+    if dm_link is not None:
+        dm_trials = np.unique(np.round(arrays['dm'], 6))
+        link_index = np.searchsorted(dm_trials, np.round(arrays['dm'], 6))
+    return find_snr_peaks(an, arrays['snr'], radius, min_prominence=min_prominence, workers=workers,
+                          link_index=link_index, max_link=dm_link, return_labels=return_labels)
+
+
+def dm_peak_of_cluster(dm, snr):
+    """
+    S/N(DM) curve of one cluster: the best S/N per DM trial. Returns (dm_peak, dm_min, dm_max, ndm), where
+    dm_peak is the vertex of the parabola through the brightest trial and its two neighbouring trials
+    (if both are in the cluster and the curve is concave there), otherwise the brightest trial's DM.
+    """
+    trials = np.unique(np.round(dm, 6))
+    best = np.array([snr[np.round(dm, 6) == d].max() for d in trials])
+    k = int(np.argmax(best))
+    dm_peak = trials[k]
+    if 0 < k < len(trials) - 1:
+        x = trials[k - 1:k + 2]; y = best[k - 1:k + 2]
+        c = np.polyfit(x - x[1], y, 2)
+        if c[0] < 0:
+            dm_peak = float(np.clip(x[1] - c[1] / (2 * c[0]), x[0], x[2]))
+    return float(dm_peak), float(trials[0]), float(trials[-1]), len(trials)
 
 
 ###############################################################################
@@ -630,17 +672,35 @@ def cmd_merge(args):
     resolve_bank_parameters(args, args.input[0], 'stage-2 clustering', need_period=False)
     tobs = args.tobs if args.tobs is not None else infos[0]['tobs']
 
+    extras = {}           # input index of a kept candidate -> extra XML fields from the clustering
     if ncands_total == 0:
         logging.warning("No candidates in any input file; writing an empty candidate list.")
         selected = np.array([], dtype=int)
     elif args.cluster:
         keep = arrays['pb'] > 0
         sub = {k: v[keep] for k, v in arrays.items()}
-        idx, _, _ = cluster_candidates(sub, tobs, args.order_highest, args.f0tol_fac,
-                                       args.nominal_mismatch, args.distance_tol,
-                                       min_prominence=args.min_prominence, workers=args.workers)
+        idx, prom, nmem, labels = cluster_candidates(sub, tobs, args.order_highest, args.f0tol_fac,
+                                                     args.nominal_mismatch, args.distance_tol,
+                                                     min_prominence=args.min_prominence, workers=args.workers,
+                                                     dm_link=args.dm_link, return_labels=True)
         selected = np.flatnonzero(keep)[idx]
-        logging.info("%d of %d candidates kept after clustering", len(selected), ncands_total)
+        nrefined = 0
+        for p, i, n_m, pr in zip(idx, selected, nmem, prom):
+            members = np.flatnonzero(labels == labels[p])
+            dm_peak, dm_min, dm_max, ndm = dm_peak_of_cluster(sub['dm'][members], sub['snr'][members])
+            ex = dict(merge_nmembers=int(n_m), merge_ndm=ndm, merge_dm_trial='%.6f' % sub['dm'][p],
+                      merge_dm_peak='%.6f' % dm_peak, merge_dm_min='%.6f' % dm_min, merge_dm_max='%.6f' % dm_max,
+                      merge_prominence='inf' if np.isinf(pr) else '%.4f' % pr)
+            if args.refine_dm and abs(dm_peak - sub['dm'][p]) > 1e-9:
+                ex['dm'] = '%.6f' % dm_peak
+                nrefined += 1
+            extras[int(i)] = ex
+        ndm_trials = len(np.unique(np.round(arrays['dm'], 6)))
+        logging.info("%d of %d candidates kept after clustering (%d DM trials in %d files%s, min_prominence %g)%s",
+                     len(selected), ncands_total, ndm_trials, len(infos),
+                     '' if args.dm_link is None else ', linked over up to %d neighbouring DM trials' % args.dm_link,
+                     args.min_prominence,
+                     '; DM of %d candidates set to the interpolated S/N(DM) peak' % nrefined if args.refine_dm else '')
     else:
         selected = np.arange(ncands_total)
 
@@ -660,6 +720,13 @@ def cmd_merge(args):
     for new_id, i in enumerate(selected):
         elem = copy.deepcopy(cand_elems[i])
         elem.set('id', str(new_id))
+        # clustering bookkeeping: cluster size, DM trials and DM range the signal was found at, the S/N(DM)
+        # peak (parabola through the brightest trial and its neighbours) and, with --refine_dm, <dm> set to it
+        for key, val in extras.get(int(i), {}).items():
+            e = elem.find(key)
+            if e is None:
+                e = ET.SubElement(elem, key)
+            e.text = str(val)
         candidates.append(elem)
 
     search_params = root.find('search_parameters')
@@ -673,6 +740,10 @@ def cmd_merge(args):
     ET.SubElement(merge_info, 'ncands_input').text = str(ncands_total)
     ET.SubElement(merge_info, 'ncands_output').text = str(len(selected))
     ET.SubElement(merge_info, 'clustered').text = str(int(bool(args.cluster)))
+    if args.cluster:
+        ET.SubElement(merge_info, 'dm_link').text = str(args.dm_link)
+        ET.SubElement(merge_info, 'min_prominence').text = str(args.min_prominence)
+        ET.SubElement(merge_info, 'refine_dm').text = str(int(bool(args.refine_dm)))
     for info in infos:
         ET.SubElement(merge_info, 'input_file').text = os.path.abspath(info['xml_file'])
 
@@ -1830,10 +1901,17 @@ def main():
                     help='keep at most this many peaks (the brightest) for stage 2')
     pc.set_defaults(func=cmd_cluster)
 
-    pm = sub.add_parser('merge', help='merge stage-2 chunk XML files into one XML file')
+    pm = sub.add_parser('merge', help='merge stage-2 XML files (e.g. one per DM trial) into one XML file')
     pm.add_argument('-i', '--input', nargs='+', required=True, help='stage-2 peasoup XML files')
     pm.add_argument('-o', '--output', default='output.xml')
     pm.add_argument('--cluster', action='store_true', help='keep only S/N peaks in a_n space')
+    pm.add_argument('--dm_link', type=int, default=None,
+                    help='with --cluster: link candidates with matching spin frequency and orbit across DM trials at '
+                         'most this many trials apart; the peaks of each S/N(DM) curve are kept (wing bumps rising less '
+                         'than --min_prominence are absorbed) (default: DM ignored)')
+    pm.add_argument('--refine_dm', action='store_true',
+                    help='with --cluster: set the DM of a kept candidate to the vertex of the parabola through the '
+                         'S/N of its brightest DM trial and the two neighbouring trials')
     add_cluster_options(pm)
     pm.set_defaults(func=cmd_merge)
 

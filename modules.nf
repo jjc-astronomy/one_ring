@@ -712,3 +712,59 @@ process hierarchical_fold_search {
     output_dp_id=\$(python -c 'import uuid; print(uuid.uuid4())')
     """
 }
+
+/*
+ * Merge of the stage-2/3 results of all DM trials of a group (params.hierarchical_search.merge_dm_trials == 1):
+ * one job per filterbank/segment group collects the output.xml of every hierarchical_fold_search job (one per
+ * dumped DM trial) and finds the peaks along DM (hierarchical_search.py merge --cluster --dm_link): candidates
+ * with matching spin frequency and orbit are linked across neighbouring DM trials, so a pulsar seen over a wide
+ * DM range is one chain, and the watershed keeps the peak of every S/N(DM) curve (bumps below min_prominence are
+ * absorbed), optionally at the interpolated peak DM (--refine_dm). The merged XML is folded by one PulsarX job.
+ * CPU only; runs in the hierarchical_fold image (python with numpy/scipy).
+ */
+process hierarchical_merge_dm {
+    label 'hierarchical_merge'
+    container "${params.apptainer_images.hierarchical_fold}"
+    tag "${meta.filstr} ${meta.cfg_name} ${meta.dm_start}_${meta.dm_end}"
+
+    publishDir "${params.publish_dir_prefix}/${params.hierarchical_search.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_name}/", pattern: "output.xml", mode: 'copy'
+
+    input:
+    // meta: the group fields (target_name, utc_start, beam_name, beam_id, filstr, coherent_dm, segment_pepoch,
+    // dm_start, dm_end, cfg_name = the stage-2 cfg name without its fold_dm<DM> part); dm_xmls in DM order
+    tuple val(meta), path(dm_xmls, stageAs: 'dm_xml_?????.xml')
+
+    output:
+    // Same shape as the hierarchical_fold_search output so that the folding stage consumes it unchanged.
+    tuple path("output.xml"), env(output_dp_id), env(publish_dir), val(meta.segment_pepoch), val(meta.beam_name), val(meta.coherent_dm), val(meta.cfg_name), val(meta.utc_start), val(meta.target_name), val(meta.beam_id), val(meta.filstr), val(meta.dm_start), val(meta.dm_end), emit: xml
+
+    script:
+    def hs = params.hierarchical_search
+    def optional_args = ""
+    if (hs.nominal_mismatch != null) optional_args += " --nominal_mismatch ${hs.nominal_mismatch}"
+    if (hs.tobs != null)             optional_args += " --tobs ${hs.tobs}"
+    if (hs.merge_dm_link != null)    optional_args += " --dm_link ${hs.merge_dm_link}"
+    if (hs.merge_refine_dm == 1)     optional_args += " --refine_dm"
+    def merge_prominence = hs.merge_min_prominence != null ? hs.merge_min_prominence : hs.min_prominence
+    """
+    #!/bin/bash
+    set -euo pipefail
+
+    publish_dir="${params.publish_dir_prefix}/${hs.search_publish_dir}/${meta.target_name}/${meta.utc_start}/${meta.filstr}/${params.pipeline_name}/${meta.dm_start}_${meta.dm_end}/${meta.cfg_name}/"
+
+    echo "Merging the stage-2/3 candidates of the DM trials:"
+    ls -v dm_xml_*.xml
+    # candidates with matching spin frequency and orbit are linked across neighbouring DM trials (--dm_link);
+    # the peaks of every S/N(DM) curve are kept (bumps rising less than min_prominence are absorbed) and,
+    # with --refine_dm, their DM is set to the interpolated peak of the curve
+    python ${hs.script} merge \\
+        -i \$(ls -v dm_xml_*.xml) -o output.xml --cluster \\
+        --order_highest ${hs.order_highest} \\
+        --f0tol_fac ${hs.f0tol_fac} \\
+        --distance_tol ${hs.distance_tol} \\
+        --min_prominence ${merge_prominence} \\
+        --workers ${task.cpus} ${optional_args}
+
+    output_dp_id=\$(python -c 'import uuid; print(uuid.uuid4())')
+    """
+}
