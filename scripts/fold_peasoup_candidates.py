@@ -11,6 +11,12 @@ from multiprocessing import Pool, cpu_count
 import re
 import json
 
+# Dispersion constants (s MHz^2 cm^3 / pc): delay = K * DM * (f^-2 - f_ref^-2).
+# The candidate DMs come from peasoup, whose dedispersion (dedisp, kernels.cuh) uses K = 4.15e3; PulsarX uses
+# K = 1/2.41e-4 (XLibs constants.h, CONST_DM). The same delay therefore needs DM_pulsarx = DM_peasoup * 4.15e3 / (1/2.41e-4).
+DM_CONST_PEASOUP = 4.15e3
+DM_CONST_PULSARX = 1. / 2.41e-4
+
 ###############################################################################
 # Logging Setup
 ###############################################################################
@@ -321,11 +327,15 @@ def fold_with_pulsarx(
     beam_name, pulsarx_threads, TEMPLATE, clfd_q_value,
     rfi_filter, cmask=None, start_fraction=None, end_fraction=None,
     extra_args=None, output_rootname=None, coherent_dm=0.0,
-    custom_nbin_plan=None, pulsarx_folding_algorithm="render"
+    custom_nbin_plan=None, pulsarx_folding_algorithm="render",
+    dm_const_search=DM_CONST_PEASOUP, dm_const_fold=DM_CONST_PULSARX
 ):
     """
-    Fold candidates with pulsarx (psrfold_fil). 
+    Fold candidates with pulsarx (psrfold_fil).
     'pepoch', 'start_fraction', and 'end_fraction' are either user-provided or derived.
+    The candidate DMs (peasoup, dispersion constant dm_const_search) are converted to PulsarX's dispersion
+    constant (dm_const_fold) so that PulsarX applies the same delays; the coherent DM of the filterbank is not
+    a peasoup DM and is passed unchanged.
     """
 
     additional_flags = ""
@@ -336,7 +346,11 @@ def fold_with_pulsarx(
         sys.exit(1)
     additional_flags += f"--{pulsarx_folding_algorithm} "
 
-    cand_dms = df['dm'].values
+    dm_scale = dm_const_search / dm_const_fold
+    cand_dms = df['dm'].values * dm_scale
+    logging.info(f"Candidate DMs converted from the search dispersion constant {dm_const_search:.6g} to PulsarX's "
+                 f"{dm_const_fold:.6g}: DM x {dm_scale:.8f} (e.g. {df['dm'].values[0]:.6f} -> {cand_dms[0]:.6f})"
+                 if len(cand_dms) else "No candidates to convert")
     cand_accs = df['acc'].values
     cand_period = df['period'].values
     cand_freq = 1 / cand_period
@@ -511,6 +525,11 @@ def main():
                         help='Extra arguments to pass to prepfold or psrfold_fil.')
     parser.add_argument('--cdm', type=float, default=None,
                         help='Coherent DM to use for folding. Default is whatever is in the XML file.')
+    parser.add_argument('--dm_const_search', type=float, default=DM_CONST_PEASOUP,
+                        help='dispersion constant of the search that produced the candidate DMs (default: peasoup/dedisp 4.15e3)')
+    parser.add_argument('--dm_const_fold', type=float, default=DM_CONST_PULSARX,
+                        help='dispersion constant of the folder (default: PulsarX 1/2.41e-4); the candidate DMs are '
+                             'multiplied by dm_const_search / dm_const_fold before folding with PulsarX')
     parser.add_argument('--custom_nbin_plan',  default=None,
                         help="Custom nbin plan to use for folding. If not provided, default bin plan is used.")
     parser.add_argument('--pulsarx_folding_algorithm', type=str, default="render",
@@ -671,7 +690,9 @@ def main():
             output_rootname=args.output_rootname,
             coherent_dm=coherent_dm,
             custom_nbin_plan=args.custom_nbin_plan,
-            pulsarx_folding_algorithm=args.pulsarx_folding_algorithm
+            pulsarx_folding_algorithm=args.pulsarx_folding_algorithm,
+            dm_const_search=args.dm_const_search,
+            dm_const_fold=args.dm_const_fold
         )
 
 if __name__ == "__main__":
