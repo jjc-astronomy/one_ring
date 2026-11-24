@@ -746,6 +746,7 @@ process hierarchical_merge_dm {
     if (hs.merge_dm_link != null)    optional_args += " --dm_link ${hs.merge_dm_link}"
     if (hs.merge_refine_dm == 1)     optional_args += " --refine_dm"
     def merge_prominence = hs.merge_min_prominence != null ? hs.merge_min_prominence : hs.min_prominence
+    def merge_distance_tol = hs.merge_distance_tol != null ? hs.merge_distance_tol : hs.distance_tol
     """
     #!/bin/bash
     set -euo pipefail
@@ -761,7 +762,7 @@ process hierarchical_merge_dm {
         -i \$(ls -v dm_xml_*.xml) -o output.xml --cluster \\
         --order_highest ${hs.order_highest} \\
         --f0tol_fac ${hs.f0tol_fac} \\
-        --distance_tol ${hs.distance_tol} \\
+        --distance_tol ${merge_distance_tol} \\
         --min_prominence ${merge_prominence} \\
         --workers ${task.cpus} ${optional_args}
 
